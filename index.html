@@ -84,7 +84,865 @@
 
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
-    const API_BASE = '/api';
+        // =========================================================================
+    // HYBRID RUNTIME ENGINE (Supports both Live Flask Backend & GitHub Pages)
+    // =========================================================================
+    // =========================================================================
+    // CONFIGURATION: DEPLOYED FLASK BACKEND URL
+    // =========================================================================
+    // If you deployed your Flask backend on Render, Railway, etc., paste the URL below:
+    // e.g. const DEPLOYED_BACKEND_URL = 'https://civic-complaint-system.onrender.com';
+    const DEPLOYED_BACKEND_URL = '';
+
+    const isGitHubPages = window.location.hostname.includes('github.io');
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('backend')) {
+      localStorage.setItem('CIVIC_BACKEND_URL', urlParams.get('backend').trim());
+    }
+    const configuredBackend = localStorage.getItem('CIVIC_BACKEND_URL') || DEPLOYED_BACKEND_URL || '';
+    let API_BASE = configuredBackend ? configuredBackend.replace(/\/$/, '') + '/api' : '/api';
+
+    // Safe JSON parser: Never crashes with 'Unexpected token <'
+    async function safeJson(res) {
+      if (!res) return null;
+      try {
+        const text = await res.text();
+        if (!text || !text.trim()) return {};
+        try {
+          return JSON.parse(text);
+        } catch (e) {
+          if (text.trim().startsWith('<') || text.includes('<!DOCTYPE') || text.includes('<html')) {
+            throw new Error(`The backend returned an HTML page (HTTP ${res.status || 'unknown'}). Verify your Flask backend deployment URL.`);
+          }
+          throw new Error(text || `Request failed with status ${res.status}`);
+        }
+      } catch (err) {
+        throw err;
+      }
+    }
+
+    // 15 Default Pre-Seeded Realistic Complaints matching Municipal DB
+    const INITIAL_CIVIC_DATA = [
+      {
+        id: 1,
+        complaint_id: "CIVIC-2026-1001",
+        title: "Exposed sparking live electric wire from damaged lamppost",
+        description: "A streetlight pole was hit by a truck. The fixture is hanging by bare live wires and sparking during drizzle right outside City Children Hospital. Extreme electric shock and fatal accident hazard.",
+        category: "Broken Streetlights",
+        predicted_category: "Broken Streetlights",
+        category_confidence: 96.5,
+        location: "Corner of 4th Avenue and Pine Street",
+        landmark: "Directly outside City Children Hospital Gate 2",
+        image_url: "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=600&auto=format&fit=crop&q=80",
+        status: "Pending",
+        priority: "High",
+        priority_level: "High",
+        priority_score: 78.8,
+        priority_reason: "Assigned High Priority with a weighted score of 78.8/100. Safety Risk: 9.0/10 (High-risk life hazard detected: electric shock, live wire, sparking; Proximity to sensitive public zone (hospital)). Severity: 6.5/10. Public Impact: 7.5/10. Waiting Time Escalation: 2.5/10.",
+        sub_scores: { safety_risk: 9.0, severity: 6.5, public_impact: 7.5, waiting_time: 2.5 },
+        safety_score: 9.0, severity_score: 6.5, impact_score: 7.5, waiting_score: 2.5,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Rajesh Kumar", citizen_email: "citizen@example.com", citizen_phone: "+1 (555) 234-5678",
+        created_at: "2026-11-05 09:30:00", updated_at: "2026-11-05 09:30:00",
+        history: [{ id: 1, complaint_id: "CIVIC-2026-1001", previous_status: null, new_status: "Pending", changed_by: "Citizen Portal", notes: "Complaint registered. AI Priority: High (78.8 pts). AI Category Confidence: 96.5%.", created_at: "2026-11-05 09:30:00" }]
+      },
+      {
+        id: 2,
+        complaint_id: "CIVIC-2026-1002",
+        title: "Deep road collapse and sinkhole on Grand Trunk Highway",
+        description: "A massive sinkhole approximately 5 feet wide and 3 feet deep has opened up on the right lane of Grand Trunk Highway near the metro flyover. Several vehicles have sustained severe wheel damage, imminent risk of vehicle overturn.",
+        category: "Road Damage",
+        predicted_category: "Road Damage",
+        category_confidence: 94.2,
+        location: "Grand Trunk Highway, Near Metro Pillar 114",
+        landmark: "Opposite City Center Mall entrance",
+        image_url: "https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?w=600&auto=format&fit=crop&q=80",
+        status: "Verified",
+        priority: "High",
+        priority_level: "High",
+        priority_score: 77.2,
+        priority_reason: "Assigned High Priority with a weighted score of 77.2/100. Safety Risk: 8.5/10 (High-risk life hazard detected: sinkhole, road collapse). Severity: 7.0/10. Public Impact: 8.0/10 (Located on high-traffic artery (highway)). Waiting Time Escalation: 4.5/10.",
+        sub_scores: { safety_risk: 8.5, severity: 7.0, public_impact: 8.0, waiting_time: 4.5 },
+        safety_score: 8.5, severity_score: 7.0, impact_score: 8.0, waiting_score: 4.5,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Sarah Jenkins", citizen_email: "sarah.j@example.com", citizen_phone: "+1 (555) 876-5432",
+        created_at: "2026-11-02 11:15:00", updated_at: "2026-11-03 14:00:00",
+        history: [
+          { id: 2, complaint_id: "CIVIC-2026-1002", previous_status: null, new_status: "Pending", changed_by: "Citizen Portal", notes: "Complaint registered. AI Priority: High (77.2 pts).", created_at: "2026-11-02 11:15:00" },
+          { id: 3, complaint_id: "CIVIC-2026-1002", previous_status: "Pending", new_status: "Verified", changed_by: "Officer David Vance", notes: "Field inspection confirmed severe road cave-in.", created_at: "2026-11-03 14:00:00" }
+        ]
+      },
+      {
+        id: 3,
+        complaint_id: "CIVIC-2026-1003",
+        title: "Main municipal water supply conduit ruptured and gushing",
+        description: "High pressure drinking water is bursting out like a geyser from the primary distribution pipe. Millions of gallons of clean drinking water are flooding the entire boulevard and homes have zero tap pressure.",
+        category: "Water Leakage",
+        predicted_category: "Water Leakage",
+        category_confidence: 91.8,
+        location: "Central Avenue, Sector 9",
+        landmark: "Near Municipal Water Booster Station",
+        image_url: "https://images.unsplash.com/photo-1584467735871-8e85353a8413?w=600&auto=format&fit=crop&q=80",
+        status: "In Progress",
+        priority: "Low",
+        priority_level: "Low",
+        priority_score: 38.5,
+        priority_reason: "Assigned Low Priority with a weighted score of 38.5/100. Safety Risk: 2.5/10. Severity: 5.5/10. Public Impact: 5.0/10. Waiting Time Escalation: 2.0/10.",
+        sub_scores: { safety_risk: 2.5, severity: 5.5, public_impact: 5.0, waiting_time: 2.0 },
+        safety_score: 2.5, severity_score: 5.5, impact_score: 5.0, waiting_score: 2.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Rajesh Kumar", citizen_email: "citizen@example.com", citizen_phone: "+1 (555) 234-5678",
+        created_at: "2026-11-04 08:00:00", updated_at: "2026-11-05 10:30:00",
+        history: [
+          { id: 4, complaint_id: "CIVIC-2026-1003", previous_status: null, new_status: "Pending", changed_by: "Citizen Portal", notes: "Registered.", created_at: "2026-11-04 08:00:00" },
+          { id: 5, complaint_id: "CIVIC-2026-1003", previous_status: "Pending", new_status: "Verified", changed_by: "Officer David Vance", notes: "Inspection completed.", created_at: "2026-11-04 16:00:00" },
+          { id: 6, complaint_id: "CIVIC-2026-1003", previous_status: "Verified", new_status: "In Progress", changed_by: "Inspector Elena Rostova", notes: "Hydro-excavation team dispatched.", created_at: "2026-11-05 10:30:00" }
+        ]
+      },
+      {
+        id: 4,
+        complaint_id: "CIVIC-2026-1004",
+        title: "Massive uncollected garbage accumulation rotting outside school",
+        description: "The public community dumpsters have not been emptied for 12 days. An enormous mound of decaying domestic and food waste has spilled across the pavement. Unbearable stench, swarms of flies and stray dogs blocking school gate.",
+        category: "Garbage Accumulation",
+        predicted_category: "Garbage Accumulation",
+        category_confidence: 95.0,
+        location: "Greenwood Street, Block C",
+        landmark: "Directly opposite Greenwood Public Elementary School",
+        image_url: "https://images.unsplash.com/photo-1605600659908-0ef719419d41?w=600&auto=format&fit=crop&q=80",
+        status: "Pending",
+        priority: "Medium",
+        priority_level: "Medium",
+        priority_score: 42.0,
+        priority_reason: "Assigned Medium Priority with a weighted score of 42.0/100. Safety Risk: 3.5/10. Severity: 4.5/10. Public Impact: 4.0/10. Waiting Time Escalation: 6.0/10.",
+        sub_scores: { safety_risk: 3.5, severity: 4.5, public_impact: 4.0, waiting_time: 6.0 },
+        safety_score: 3.5, severity_score: 4.5, impact_score: 4.0, waiting_score: 6.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Sarah Jenkins", citizen_email: "sarah.j@example.com", citizen_phone: "+1 (555) 876-5432",
+        created_at: "2026-10-30 14:00:00", updated_at: "2026-10-30 14:00:00",
+        history: [{ id: 7, complaint_id: "CIVIC-2026-1004", previous_status: null, new_status: "Pending", changed_by: "Citizen Portal", notes: "Registered.", created_at: "2026-10-30 14:00:00" }]
+      },
+      {
+        id: 5,
+        complaint_id: "CIVIC-2026-1005",
+        title: "Black sewage water overflowing from choked drain into market",
+        description: "The underground stormwater and sewer line is completely clogged with hardened sludge and debris. Knee-deep foul sewage is backing up into grocery stores and walkway causing severe sanitary hazard.",
+        category: "Blocked Drainage",
+        predicted_category: "Blocked Drainage",
+        category_confidence: 93.4,
+        location: "Market Road, Sector 15 Commercial Hub",
+        landmark: "Next to Central Vegetable Market",
+        image_url: "https://images.unsplash.com/photo-1541888946425-d0fbb18615f3?w=600&auto=format&fit=crop&q=80",
+        status: "In Progress",
+        priority: "Medium",
+        priority_level: "Medium",
+        priority_score: 49.2,
+        priority_reason: "Assigned Medium Priority with a weighted score of 49.2/100. Safety Risk: 4.0/10. Severity: 5.5/10. Public Impact: 5.5/10. Waiting Time Escalation: 4.0/10.",
+        sub_scores: { safety_risk: 4.0, severity: 5.5, public_impact: 5.5, waiting_time: 4.0 },
+        safety_score: 4.0, severity_score: 5.5, impact_score: 5.5, waiting_score: 4.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Rajesh Kumar", citizen_email: "citizen@example.com", citizen_phone: "+1 (555) 234-5678",
+        created_at: "2026-11-01 16:30:00", updated_at: "2026-11-02 12:00:00",
+        history: [
+          { id: 8, complaint_id: "CIVIC-2026-1005", previous_status: null, new_status: "Pending", changed_by: "Citizen Portal", notes: "Registered.", created_at: "2026-11-01 16:30:00" },
+          { id: 9, complaint_id: "CIVIC-2026-1005", previous_status: "Pending", new_status: "In Progress", changed_by: "Officer David Vance", notes: "Suction tanker deployed.", created_at: "2026-11-02 12:00:00" }
+        ]
+      },
+      {
+        id: 6,
+        complaint_id: "CIVIC-2026-1006",
+        title: "Deep road collapse and sinkhole on Grand Trunk Highway near Metro",
+        description: "A massive sinkhole approximately 5 feet wide and 3 feet deep has opened up on Grand Trunk Highway near the metro flyover. Several vehicles have sustained wheel damage.",
+        category: "Road Damage",
+        predicted_category: "Road Damage",
+        category_confidence: 94.0,
+        location: "Grand Trunk Highway, Near Metro Pillar 114",
+        landmark: "Near City Center Mall",
+        image_url: "https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?w=600&auto=format&fit=crop&q=80",
+        status: "Pending",
+        priority: "Medium",
+        priority_level: "Medium",
+        priority_score: 56.0,
+        priority_reason: "Assigned Medium Priority with a weighted score of 56.0/100. High similarity duplicate flag.",
+        sub_scores: { safety_risk: 6.0, severity: 5.0, public_impact: 6.0, waiting_time: 1.0 },
+        safety_score: 6.0, severity_score: 5.0, impact_score: 6.0, waiting_score: 1.0,
+        is_duplicate: 1, duplicate_of_id: "CIVIC-2026-1002", duplicate_similarity: 88.1,
+        citizen_name: "Rajesh Kumar", citizen_email: "citizen@example.com", citizen_phone: "+1 (555) 234-5678",
+        created_at: "2026-11-05 13:00:00", updated_at: "2026-11-05 13:00:00",
+        history: [{ id: 10, complaint_id: "CIVIC-2026-1006", previous_status: null, new_status: "Pending", changed_by: "Citizen Portal", notes: "Potential duplicate identified (88.1% match with CIVIC-2026-1002).", created_at: "2026-11-05 13:00:00" }]
+      },
+      {
+        id: 7,
+        complaint_id: "CIVIC-2026-1007",
+        title: "Five consecutive streetlights completely dead on Ring Road curve",
+        description: "A stretch of 5 streetlamps is totally non-functional creating a dangerous dark blind spot on the sharp curve of Outer Ring Road. Drivers cannot see pedestrians or divider edges at night.",
+        category: "Broken Streetlights",
+        predicted_category: "Broken Streetlights",
+        category_confidence: 92.5,
+        location: "Outer Ring Road, Km marker 14",
+        landmark: "Between Railway Overbridge and North Exit",
+        image_url: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=600&auto=format&fit=crop&q=80",
+        status: "Verified",
+        priority: "Medium",
+        priority_level: "Medium",
+        priority_score: 55.8,
+        priority_reason: "Assigned Medium Priority with a weighted score of 55.8/100.",
+        sub_scores: { safety_risk: 5.5, severity: 4.5, public_impact: 6.0, waiting_time: 7.0 },
+        safety_score: 5.5, severity_score: 4.5, impact_score: 6.0, waiting_score: 7.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Sarah Jenkins", citizen_email: "sarah.j@example.com", citizen_phone: "+1 (555) 876-5432",
+        created_at: "2026-10-29 20:00:00", updated_at: "2026-10-31 11:00:00",
+        history: [{ id: 11, complaint_id: "CIVIC-2026-1007", previous_status: "Pending", new_status: "Verified", changed_by: "Inspector Elena Rostova", notes: "Field verified dark zone.", created_at: "2026-10-31 11:00:00" }]
+      },
+      {
+        id: 8,
+        complaint_id: "CIVIC-2026-1008",
+        title: "Steady water pipe fracture leaking drinking water onto walkway",
+        description: "Drinking water pipeline under the pedestrian footpath has developed a fissure. Potable water is steadily bubbling up and eroding the brick walkway near the bus terminus.",
+        category: "Water Leakage",
+        predicted_category: "Water Leakage",
+        category_confidence: 88.0,
+        location: "Station Road, Bus Terminus Bay 3",
+        landmark: "Opposite Railway Station Clock Tower",
+        image_url: "https://images.unsplash.com/photo-1584467735871-8e85353a8413?w=600&auto=format&fit=crop&q=80",
+        status: "Resolved",
+        priority: "Medium",
+        priority_level: "Medium",
+        priority_score: 41.0,
+        priority_reason: "Resolved. Assigned Medium Priority.",
+        sub_scores: { safety_risk: 2.5, severity: 4.0, public_impact: 4.5, waiting_time: 10.0 },
+        safety_score: 2.5, severity_score: 4.0, impact_score: 4.5, waiting_score: 10.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Rajesh Kumar", citizen_email: "citizen@example.com", citizen_phone: "+1 (555) 234-5678",
+        created_at: "2026-10-22 09:00:00", updated_at: "2026-10-25 15:30:00",
+        history: [{ id: 12, complaint_id: "CIVIC-2026-1008", previous_status: "In Progress", new_status: "Resolved", changed_by: "Officer David Vance", notes: "Valve replaced and brick pavers restored.", created_at: "2026-10-25 15:30:00" }]
+      },
+      {
+        id: 9,
+        complaint_id: "CIVIC-2026-1009",
+        title: "Construction debris and mixed waste dumped on residential corner",
+        description: "Unidentified contractors have dumped 3 truckloads of broken plaster, tiles and domestic bags on the corner of 7th Cross. Dust is blowing into residential homes.",
+        category: "Garbage Accumulation",
+        predicted_category: "Garbage Accumulation",
+        category_confidence: 90.0,
+        location: "7th Cross Road, Indira Enclave",
+        landmark: "Adjacent to Community Park Boundary",
+        image_url: "https://images.unsplash.com/photo-1605600659908-0ef719419d41?w=600&auto=format&fit=crop&q=80",
+        status: "Resolved",
+        priority: "Medium",
+        priority_level: "Medium",
+        priority_score: 41.8,
+        priority_reason: "Resolved. Assigned Medium Priority.",
+        sub_scores: { safety_risk: 3.0, severity: 4.0, public_impact: 4.0, waiting_time: 10.0 },
+        safety_score: 3.0, severity_score: 4.0, impact_score: 4.0, waiting_score: 10.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Sarah Jenkins", citizen_email: "sarah.j@example.com", citizen_phone: "+1 (555) 876-5432",
+        created_at: "2026-10-19 14:00:00", updated_at: "2026-10-22 17:00:00",
+        history: [{ id: 13, complaint_id: "CIVIC-2026-1009", previous_status: "In Progress", new_status: "Resolved", changed_by: "Officer David Vance", notes: "Debris cleared via JCB loader.", created_at: "2026-10-22 17:00:00" }]
+      },
+      {
+        id: 10,
+        complaint_id: "CIVIC-2026-1010",
+        title: "Clogged stormwater gutter causing waterlogging after rain",
+        description: "Roadside gutter is filled with fallen leaves and dirt. Even mild rain causes water to pool for 24 hours in front of residential apartments.",
+        category: "Blocked Drainage",
+        predicted_category: "Blocked Drainage",
+        category_confidence: 89.5,
+        location: "Silverwood Lane, Sector 4",
+        landmark: "Outside Sunrise Apartments Gate 1",
+        image_url: "https://images.unsplash.com/photo-1541888946425-d0fbb18615f3?w=600&auto=format&fit=crop&q=80",
+        status: "Resolved",
+        priority: "Medium",
+        priority_level: "Medium",
+        priority_score: 41.8,
+        priority_reason: "Resolved. Assigned Medium Priority.",
+        sub_scores: { safety_risk: 3.0, severity: 4.0, public_impact: 4.0, waiting_time: 10.0 },
+        safety_score: 3.0, severity_score: 4.0, impact_score: 4.0, waiting_score: 10.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Rajesh Kumar", citizen_email: "citizen@example.com", citizen_phone: "+1 (555) 234-5678",
+        created_at: "2026-10-15 10:00:00", updated_at: "2026-10-18 11:30:00",
+        history: [{ id: 14, complaint_id: "CIVIC-2026-1010", previous_status: "In Progress", new_status: "Resolved", changed_by: "Inspector Elena Rostova", notes: "Culvert desilted completely.", created_at: "2026-10-18 11:30:00" }]
+      },
+      {
+        id: 11,
+        complaint_id: "CIVIC-2026-1011",
+        title: "Cracked road surface with multiple minor potholes on 3rd Lane",
+        description: "The asphalt has worn down over the last year causing multiple small potholes. Bicycles and scooters experience bumpy rides, needs asphalt patching.",
+        category: "Road Damage",
+        predicted_category: "Road Damage",
+        category_confidence: 93.0,
+        location: "3rd Lane, Rose Garden Colony",
+        landmark: "Near Sector Post Office",
+        image_url: "https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?w=600&auto=format&fit=crop&q=80",
+        status: "Pending",
+        priority: "Low",
+        priority_level: "Low",
+        priority_score: 27.2,
+        priority_reason: "Assigned Low Priority with a weighted score of 27.2/100.",
+        sub_scores: { safety_risk: 2.0, severity: 2.5, public_impact: 3.0, waiting_time: 3.0 },
+        safety_score: 2.0, severity_score: 2.5, impact_score: 3.0, waiting_score: 3.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Sarah Jenkins", citizen_email: "sarah.j@example.com", citizen_phone: "+1 (555) 876-5432",
+        created_at: "2026-11-03 16:00:00", updated_at: "2026-11-03 16:00:00",
+        history: [{ id: 15, complaint_id: "CIVIC-2026-1011", previous_status: null, new_status: "Pending", changed_by: "Citizen Portal", notes: "Registered.", created_at: "2026-11-03 16:00:00" }]
+      },
+      {
+        id: 12,
+        complaint_id: "CIVIC-2026-1012",
+        title: "Flickering LED streetlight pole outside community hall",
+        description: "The LED streetlight outside the community hall turns on and off erratically every 5 seconds. Extremely annoying strobe effect at night.",
+        category: "Broken Streetlights",
+        predicted_category: "Broken Streetlights",
+        category_confidence: 91.0,
+        location: "Civic Center Road, Ward 12",
+        landmark: "In front of Ward 12 Community Hall",
+        image_url: "",
+        status: "Rejected",
+        priority: "Medium",
+        priority_level: "Medium",
+        priority_score: 43.5,
+        priority_reason: "Rejected. Private community hall property outside municipal charter.",
+        sub_scores: { safety_risk: 3.0, severity: 3.5, public_impact: 4.0, waiting_time: 8.0 },
+        safety_score: 3.0, severity_score: 3.5, impact_score: 4.0, waiting_score: 8.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Rajesh Kumar", citizen_email: "citizen@example.com", citizen_phone: "+1 (555) 234-5678",
+        created_at: "2026-10-27 19:30:00", updated_at: "2026-10-28 10:00:00",
+        history: [{ id: 16, complaint_id: "CIVIC-2026-1012", previous_status: "Pending", new_status: "Rejected", changed_by: "Officer David Vance", notes: "Private property installation.", created_at: "2026-10-28 10:00:00" }]
+      },
+      {
+        id: 13,
+        complaint_id: "CIVIC-2026-1013",
+        title: "Clean water gushing from damaged fire hydrant valve",
+        description: "A fire hydrant valve seems to have been hit or loosened. A continuous stream of potable water is flowing across the sidewalk into the storm gutter.",
+        category: "Water Leakage",
+        predicted_category: "Water Leakage",
+        category_confidence: 90.0,
+        location: "Commercial Street, Block B",
+        landmark: "Beside Apex Bank ATM",
+        image_url: "https://images.unsplash.com/photo-1584467735871-8e85353a8413?w=600&auto=format&fit=crop&q=80",
+        status: "Verified",
+        priority: "Low",
+        priority_level: "Low",
+        priority_score: 36.0,
+        priority_reason: "Assigned Low Priority with a weighted score of 36.0/100.",
+        sub_scores: { safety_risk: 2.0, severity: 4.0, public_impact: 4.5, waiting_time: 3.0 },
+        safety_score: 2.0, severity_score: 4.0, impact_score: 4.5, waiting_score: 3.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Sarah Jenkins", citizen_email: "sarah.j@example.com", citizen_phone: "+1 (555) 876-5432",
+        created_at: "2026-11-03 14:00:00", updated_at: "2026-11-04 10:00:00",
+        history: [{ id: 17, complaint_id: "CIVIC-2026-1013", previous_status: "Pending", new_status: "Verified", changed_by: "Officer David Vance", notes: "Hydrant inspected.", created_at: "2026-11-04 10:00:00" }]
+      },
+      {
+        id: 14,
+        complaint_id: "CIVIC-2026-1014",
+        title: "Rotting food waste dumped in open plot breeding mosquitoes",
+        description: "Commercial restaurant garbage bags dumped in an open empty plot. Strong putrid odor and severe mosquito breeding affecting adjoining households.",
+        category: "Garbage Accumulation",
+        predicted_category: "Garbage Accumulation",
+        category_confidence: 92.0,
+        location: "Oak Street, Plot 45",
+        landmark: "Behind Food Plaza Restaurant",
+        image_url: "",
+        status: "Pending",
+        priority: "Low",
+        priority_level: "Low",
+        priority_score: 32.2,
+        priority_reason: "Assigned Low Priority with a weighted score of 32.2/100.",
+        sub_scores: { safety_risk: 3.0, severity: 3.0, public_impact: 3.0, waiting_time: 2.0 },
+        safety_score: 3.0, severity_score: 3.0, impact_score: 3.0, waiting_score: 2.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Rajesh Kumar", citizen_email: "citizen@example.com", citizen_phone: "+1 (555) 234-5678",
+        created_at: "2026-11-04 11:00:00", updated_at: "2026-11-04 11:00:00",
+        history: [{ id: 18, complaint_id: "CIVIC-2026-1014", previous_status: null, new_status: "Pending", changed_by: "Citizen Portal", notes: "Registered.", created_at: "2026-11-04 11:00:00" }]
+      },
+      {
+        id: 15,
+        complaint_id: "CIVIC-2026-1015",
+        title: "Open missing manhole cover on unlit street corner",
+        description: "The cast iron manhole cover on the sewer chamber is completely missing. It is an open 8-foot drop on a poorly lit corner. Severe fatal accident hazard for pedestrians and cyclists.",
+        category: "Blocked Drainage",
+        predicted_category: "Blocked Drainage",
+        category_confidence: 95.0,
+        location: "11th Main, Cross 3, Gandhi Nagar",
+        landmark: "Near Govt Primary Health Center",
+        image_url: "https://images.unsplash.com/photo-1541888946425-d0fbb18615f3?w=600&auto=format&fit=crop&q=80",
+        status: "Pending",
+        priority: "High",
+        priority_level: "High",
+        priority_score: 71.0,
+        priority_reason: "Assigned High Priority with a weighted score of 71.0/100. Safety Risk: 9.0/10 (open manhole hazard).",
+        sub_scores: { safety_risk: 9.0, severity: 6.0, public_impact: 6.5, waiting_time: 1.0 },
+        safety_score: 9.0, severity_score: 6.0, impact_score: 6.5, waiting_score: 1.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Sarah Jenkins", citizen_email: "sarah.j@example.com", citizen_phone: "+1 (555) 876-5432",
+        created_at: "2026-11-05 17:00:00", updated_at: "2026-11-05 17:00:00",
+        history: [{ id: 19, complaint_id: "CIVIC-2026-1015", previous_status: null, new_status: "Pending", changed_by: "Citizen Portal", notes: "Registered.", created_at: "2026-11-05 17:00:00" }]
+      }
+    ];
+
+    // Helper functions for client-side persistence
+    function getStoredComplaints() {
+      const stored = localStorage.getItem('civic_complaints_v1');
+      if (stored) {
+        try { return JSON.parse(stored); } catch (e) {}
+      }
+      localStorage.setItem('civic_complaints_v1', JSON.stringify(INITIAL_CIVIC_DATA));
+      return INITIAL_CIVIC_DATA;
+    }
+
+    function saveStoredComplaints(complaints) {
+      localStorage.setItem('civic_complaints_v1', JSON.stringify(complaints));
+    }
+
+    // Client-side NLP Category Predictor
+    function clientPredictCategory(text) {
+      const t = (text || '').toLowerCase();
+      const scores = {
+        'Road Damage': 0,
+        'Garbage Accumulation': 0,
+        'Water Leakage': 0,
+        'Blocked Drainage': 0,
+        'Broken Streetlights': 0
+      };
+
+      const kw = {
+        'Road Damage': ['pothole', 'sinkhole', 'crater', 'asphalt', 'road', 'tar', 'paver', 'curb', 'divider', 'bitumen', 'tarmac', 'fissure', 'crack', 'pavement'],
+        'Garbage Accumulation': ['garbage', 'trash', 'dumpster', 'waste', 'litter', 'debris', 'rotting', 'flies', 'stench', 'smell', 'dump', 'food waste'],
+        'Water Leakage': ['water', 'pipe', 'pipeline', 'leak', 'gushing', 'burst', 'hydrant', 'potable', 'drinking water', 'tap', 'flooding', 'conduit'],
+        'Blocked Drainage': ['drain', 'drainage', 'sewage', 'sewer', 'manhole', 'sludge', 'gutter', 'waterlog', 'culvert', 'choked', 'clogged'],
+        'Broken Streetlights': ['streetlight', 'light', 'lamp', 'lamppost', 'sparking', 'wire', 'dark', 'bulb', 'pole', 'led', 'flicker', 'blackout']
+      };
+
+      for (const [cat, words] of Object.entries(kw)) {
+        for (const w of words) {
+          if (t.includes(w)) scores[cat] += 2;
+        }
+      }
+
+      let bestCat = 'Road Damage';
+      let maxScore = -1;
+      for (const [cat, sc] of Object.entries(scores)) {
+        if (sc > maxScore) { maxScore = sc; bestCat = cat; }
+      }
+      const confidence = maxScore > 0 ? Math.min(96.5, 60 + maxScore * 8) : 55.0;
+      return { predicted_category: bestCat, confidence };
+    }
+
+    // Client-side 4-Dimension Priority Calculator
+    function clientCalculatePriority(title, description, location) {
+      const text = ((title || '') + ' ' + (description || '') + ' ' + (location || '')).toLowerCase();
+
+      let safety = 2.0;
+      if (text.includes('live wire') || text.includes('sparking') || text.includes('electric shock') || text.includes('fatal') || text.includes('sinkhole') || text.includes('open manhole')) {
+        safety = 9.0;
+      } else if (text.includes('hospital') || text.includes('school') || text.includes('children') || text.includes('hazard')) {
+        safety = 6.5;
+      }
+
+      let severity = 3.0;
+      if (text.includes('burst') || text.includes('completely blocked') || text.includes('gushing') || text.includes('knee-deep') || text.includes('massive')) {
+        severity = 7.5;
+      } else if (text.includes('overflowing') || text.includes('deep') || text.includes('damaged')) {
+        severity = 5.5;
+      }
+
+      let impact = 4.0;
+      if (text.includes('highway') || text.includes('artery') || text.includes('main road') || text.includes('ring road') || text.includes('metro') || text.includes('market')) {
+        impact = 7.5;
+      } else if (text.includes('station') || text.includes('avenue') || text.includes('bus')) {
+        impact = 6.0;
+      }
+
+      const waiting = 1.0;
+      const score = Math.min(100, Math.max(10, Math.round(((safety * 3.5) + (severity * 2.5) + (impact * 2.5) + (waiting * 1.5)) * 10) / 10));
+
+      let priority = 'Low';
+      if (score >= 80) priority = 'Critical';
+      else if (score >= 60) priority = 'High';
+      else if (score >= 40) priority = 'Medium';
+
+      return {
+        score,
+        priority,
+        explanation: `Assigned ${priority} Priority with a score of ${score}/100. Safety: ${safety}/10, Severity: ${severity}/10, Public Impact: ${impact}/10, Waiting Escalation: ${waiting}/10.`,
+        sub_scores: { safety_risk: safety, severity, public_impact: impact, waiting_time: waiting }
+      };
+    }
+
+    // Client-side Duplicate Detector
+    function clientFindDuplicates(title, desc, complaints) {
+      const tokens = (title + ' ' + desc).toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(w => w.length > 3);
+      let bestMatch = null;
+      let maxPct = 0;
+
+      for (const c of complaints) {
+        const cTokens = (c.title + ' ' + c.description).toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(w => w.length > 3);
+        const intersect = tokens.filter(t => cTokens.includes(t));
+        const sim = Math.min(100, Math.round((intersect.length * 2 / (tokens.length + cTokens.length)) * 100));
+        if (sim > maxPct) {
+          maxPct = sim;
+          bestMatch = c;
+        }
+      }
+
+      const isDup = maxPct >= 75;
+      return {
+        is_duplicate: isDup ? 1 : 0,
+        similarity_percentage: maxPct,
+        similar_complaint_id: isDup && bestMatch ? bestMatch.complaint_id : null,
+        existing_complaint_description: isDup && bestMatch ? bestMatch.description : null,
+        matches: maxPct >= 40 && bestMatch ? [{
+          complaint_id: bestMatch.complaint_id,
+          title: bestMatch.title,
+          location: bestMatch.location,
+          status: bestMatch.status,
+          similarity_percentage: maxPct
+        }] : []
+      };
+    }
+
+    // Client-side Mock Router that handles all REST APIs
+    async function mockCivicApi(urlStr, options = {}) {
+      const method = (options.method || 'GET').toUpperCase();
+      const complaints = getStoredComplaints();
+      const parsedUrl = new URL(urlStr, window.location.href);
+      const path = parsedUrl.pathname.replace(/^.*?\/api/, '/api');
+      const params = parsedUrl.searchParams;
+
+      // Helper to generate a Response object
+      const jsonResponse = (data, status = 200) => {
+        return new Response(JSON.stringify(data), {
+          status,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      };
+
+      // 1. /api/auth/me
+      if (path === '/api/auth/me') {
+        const tok = localStorage.getItem('civic_token');
+        if (tok && tok.includes(':')) {
+          const parts = tok.split(':');
+          return jsonResponse({ user: { id: parseInt(parts[0]) || 1, role: parts[1], email: parts[2], name: parts[2].split('@')[0] } });
+        }
+        return jsonResponse({ user: { id: 3, role: 'staff', email: 'staff@civic.gov', name: 'Officer David Vance' } });
+      }
+
+      // 2. /api/auth/login
+      if (path === '/api/auth/login') {
+        const body = options.body ? (typeof options.body === 'string' ? JSON.parse(options.body) : options.body) : {};
+        const email = body.email || 'staff@civic.gov';
+        const role = email.includes('staff') || email.includes('inspector') ? 'staff' : 'citizen';
+        const name = email === 'staff@civic.gov' ? 'Officer David Vance' : (email === 'citizen@example.com' ? 'Rajesh Kumar' : email.split('@')[0]);
+        const user = { id: 1, email, name, role, phone: '+1 (555) 019-2831' };
+        const token = `1:${role}:${email}`;
+        return jsonResponse({ token, user, message: 'Login successful' });
+      }
+
+      // 3. /api/auth/register
+      if (path === '/api/auth/register') {
+        const body = options.body ? JSON.parse(options.body) : {};
+        const user = { id: Date.now(), email: body.email || 'new@example.com', name: body.name || 'Citizen', role: 'citizen', phone: body.phone || '' };
+        return jsonResponse({ token: `1:citizen:${user.email}`, user, message: 'Registration successful' }, 201);
+      }
+
+      // 4. /api/analytics/summary
+      if (path === '/api/analytics/summary') {
+        const total = complaints.length;
+        const pending = complaints.filter(c => c.status === 'Pending').length;
+        const verified = complaints.filter(c => c.status === 'Verified').length;
+        const in_progress = complaints.filter(c => c.status === 'In Progress').length;
+        const resolved = complaints.filter(c => c.status === 'Resolved').length;
+        const rejected = complaints.filter(c => c.status === 'Rejected').length;
+        const critical = complaints.filter(c => c.priority === 'Critical').length;
+        const high = complaints.filter(c => c.priority === 'High').length;
+        const duplicates = complaints.filter(c => c.is_duplicate).length;
+        const avg_priority = Math.round(complaints.reduce((a, b) => a + (b.priority_score || 50), 0) / (total || 1) * 10) / 10;
+        return jsonResponse({
+          total, pending, verified, in_progress, resolved, rejected,
+          critical, high, critical_and_high: critical + high,
+          duplicates_flagged: duplicates,
+          resolution_rate: total > 0 ? Math.round((resolved / total) * 1000) / 10 : 0.0,
+          avg_priority_score: avg_priority
+        });
+      }
+
+      // 5. /api/analytics/charts
+      if (path === '/api/analytics/charts') {
+        const catCounts = CATEGORIES.map(cat => complaints.filter(c => c.category === cat).length);
+        const prioCounts = ['Critical', 'High', 'Medium', 'Low'].map(p => complaints.filter(c => c.priority === p).length);
+        const statusCounts = ['Pending', 'Verified', 'In Progress', 'Resolved', 'Rejected'].map(s => complaints.filter(c => c.status === s).length);
+        return jsonResponse({
+          categories: { labels: CATEGORIES, data: catCounts },
+          category_distribution: { labels: CATEGORIES, data: catCounts },
+          priorities: { labels: ['Critical', 'High', 'Medium', 'Low'], data: prioCounts },
+          priority_distribution: { labels: ['Critical', 'High', 'Medium', 'Low'], data: prioCounts },
+          statuses: { labels: ['Pending', 'Verified', 'In Progress', 'Resolved', 'Rejected'], data: statusCounts },
+          status_distribution: { labels: ['Pending', 'Verified', 'In Progress', 'Resolved', 'Rejected'], data: statusCounts },
+          monthly: { labels: ['2026-10', '2026-11'], submitted: [6, complaints.length - 6], resolved: [3, complaints.filter(c => c.status === 'Resolved').length - 3] },
+          monthly_trends: { labels: ['2026-10', '2026-11'], submitted: [6, complaints.length - 6], resolved: [3, complaints.filter(c => c.status === 'Resolved').length - 3] }
+        });
+      }
+
+      // 6. /api/analytics (combined)
+      if (path === '/api/analytics') {
+        const sumResp = await (await mockCivicApi('/api/analytics/summary')).json();
+        const chartResp = await (await mockCivicApi('/api/analytics/charts')).json();
+        return jsonResponse({ summary: sumResp, charts: chartResp });
+      }
+
+      // 7. /api/complaints/preview
+      if (path === '/api/complaints/preview') {
+        const body = options.body ? (typeof options.body === 'string' ? JSON.parse(options.body) : options.body) : {};
+        const catRes = clientPredictCategory(body.description || body.title || '');
+        const prioRes = clientCalculatePriority(body.title, body.description, body.location);
+        const dupRes = clientFindDuplicates(body.title || '', body.description || '', complaints);
+        return jsonResponse({
+          predicted_category: catRes.predicted_category,
+          category_confidence: catRes.confidence,
+          ai_classification: {
+            predicted_category: catRes.predicted_category,
+            confidence: catRes.confidence,
+            probabilities: { [catRes.predicted_category]: catRes.confidence }
+          },
+          priority_assessment: {
+            priority: prioRes.priority,
+            score: prioRes.score,
+            priority_score: prioRes.score,
+            explanation: prioRes.explanation,
+            priority_reason: prioRes.explanation,
+            sub_scores: prioRes.sub_scores,
+            safety_score: prioRes.sub_scores ? prioRes.sub_scores.safety_risk : 8.0,
+            severity_score: prioRes.sub_scores ? prioRes.sub_scores.severity : 7.0,
+            impact_score: prioRes.sub_scores ? prioRes.sub_scores.public_impact : 7.5,
+            waiting_score: prioRes.sub_scores ? prioRes.sub_scores.waiting_time : 2.0,
+            factors: []
+          },
+          duplicate_analysis: dupRes,
+          duplicate_detection: {
+            is_duplicate: dupRes.is_duplicate,
+            is_duplicate_likely: dupRes.is_duplicate === 1 || dupRes.is_duplicate === true,
+            similarity_percentage: dupRes.similarity_percentage,
+            top_similarity: dupRes.similarity_percentage,
+            similar_complaint_id: dupRes.similar_complaint_id,
+            existing_complaint_description: dupRes.existing_complaint_description,
+            top_match: dupRes.similar_complaint_id ? { complaint_id: dupRes.similar_complaint_id } : null,
+            matches: dupRes.matches || []
+          }
+        });
+      }
+
+      // 8. /api/complaints/track/:id
+      if (path.startsWith('/api/complaints/track/')) {
+        const id = decodeURIComponent(path.replace('/api/complaints/track/', '').trim());
+        const comp = complaints.find(c => String(c.complaint_id).toLowerCase() === id.toLowerCase() || String(c.id) === id);
+        if (comp) return jsonResponse({ complaint: comp });
+        return jsonResponse({ error: `Complaint '${id}' not found` }, 404);
+      }
+
+      // 9. /api/complaints or /api/staff/complaints (GET)
+      if ((path === '/api/complaints' || path === '/api/staff/complaints') && method === 'GET') {
+        let filtered = [...complaints];
+        const search = (params.get('search') || '').toLowerCase();
+        const category = params.get('category');
+        const priority = params.get('priority');
+        const status = params.get('status');
+        const duplicate = params.get('duplicate');
+
+        if (search) {
+          filtered = filtered.filter(c => (c.title + ' ' + c.description + ' ' + c.complaint_id + ' ' + c.location).toLowerCase().includes(search));
+        }
+        if (category) filtered = filtered.filter(c => c.category === category);
+        if (priority) filtered = filtered.filter(c => c.priority === priority);
+        if (status) filtered = filtered.filter(c => c.status === status);
+        if (duplicate === '1') filtered = filtered.filter(c => c.is_duplicate);
+        if (duplicate === '0') filtered = filtered.filter(c => !c.is_duplicate);
+
+        return jsonResponse({ complaints: filtered, total: filtered.length });
+      }
+
+      // 10. Single complaint details: /api/complaints/:id or /api/staff/complaints/:id (GET)
+      const detailMatch = path.match(/\/api\/(?:staff\/)?complaints\/([^\/]+)$/);
+      if (detailMatch && method === 'GET') {
+        const id = decodeURIComponent(detailMatch[1]);
+        const comp = complaints.find(c => String(c.complaint_id).toLowerCase() === id.toLowerCase() || String(c.id) === id);
+        if (comp) {
+          const dupAnalysis = clientFindDuplicates(comp.title, comp.description, complaints.filter(c => c.complaint_id !== comp.complaint_id));
+          return jsonResponse({ complaint: { ...comp, duplicate_analysis: dupAnalysis } });
+        }
+        return jsonResponse({ error: `Complaint #${id} not found` }, 404);
+      }
+
+      // 11. Verify complaint: /api/complaints/:id/verify
+      if (path.includes('/verify') && (method === 'PUT' || method === 'PATCH' || method === 'POST')) {
+        const idMatch = path.match(/\/api\/(?:staff\/)?complaints\/([^\/]+)\/verify/);
+        const id = idMatch ? idMatch[1] : '';
+        const idx = complaints.findIndex(c => String(c.complaint_id).toLowerCase() === id.toLowerCase() || String(c.id) === id);
+        if (idx !== -1) {
+          const body = options.body ? JSON.parse(options.body) : {};
+          complaints[idx].status = 'Verified';
+          complaints[idx].history.push({
+            id: Date.now(),
+            complaint_id: complaints[idx].complaint_id,
+            previous_status: 'Pending',
+            new_status: 'Verified',
+            changed_by: 'Officer David Vance',
+            notes: body.notes || 'Verified by municipal officer.',
+            created_at: new Date().toISOString().replace('T', ' ').substring(0, 19)
+          });
+          saveStoredComplaints(complaints);
+          return jsonResponse({ message: `Complaint ${complaints[idx].complaint_id} verified successfully.`, status: 'Verified' });
+        }
+        return jsonResponse({ error: 'Complaint not found' }, 404);
+      }
+
+      // 12. Update Status: /api/complaints/:id/status
+      if (path.includes('/status') && (method === 'PUT' || method === 'PATCH' || method === 'POST')) {
+        const idMatch = path.match(/\/api\/(?:staff\/)?complaints\/([^\/]+)\/status/);
+        const id = idMatch ? idMatch[1] : '';
+        const idx = complaints.findIndex(c => String(c.complaint_id).toLowerCase() === id.toLowerCase() || String(c.id) === id);
+        if (idx !== -1) {
+          const body = options.body ? JSON.parse(options.body) : {};
+          const prev = complaints[idx].status;
+          complaints[idx].status = body.status || 'Verified';
+          complaints[idx].history.push({
+            id: Date.now(),
+            complaint_id: complaints[idx].complaint_id,
+            previous_status: prev,
+            new_status: complaints[idx].status,
+            changed_by: body.changed_by || 'Officer David Vance',
+            notes: body.notes || 'Status updated.',
+            created_at: new Date().toISOString().replace('T', ' ').substring(0, 19)
+          });
+          saveStoredComplaints(complaints);
+          return jsonResponse({ message: `Status updated to ${complaints[idx].status}.`, status: complaints[idx].status });
+        }
+        return jsonResponse({ error: 'Complaint not found' }, 404);
+      }
+
+      // 13. Duplicate toggle
+      if (path.includes('/duplicate') && (method === 'PATCH' || method === 'PUT')) {
+        const idMatch = path.match(/\/api\/(?:staff\/)?complaints\/([^\/]+)\/duplicate/);
+        const id = idMatch ? idMatch[1] : '';
+        const idx = complaints.findIndex(c => String(c.complaint_id).toLowerCase() === id.toLowerCase() || String(c.id) === id);
+        if (idx !== -1) {
+          const body = options.body ? JSON.parse(options.body) : {};
+          complaints[idx].is_duplicate = body.is_duplicate !== undefined ? body.is_duplicate : 1;
+          complaints[idx].duplicate_of_id = body.duplicate_of_id || null;
+          complaints[idx].duplicate_similarity = body.duplicate_similarity || 85.0;
+          saveStoredComplaints(complaints);
+          return jsonResponse({ message: 'Duplicate flag updated successfully.' });
+        }
+        return jsonResponse({ error: 'Complaint not found' }, 404);
+      }
+
+      // 14. Recalculate priorities
+      if (path.includes('/recalculate-priorities')) {
+        complaints.forEach(c => {
+          if (c.status !== 'Resolved' && c.status !== 'Rejected') {
+            const p = clientCalculatePriority(c.title, c.description, c.location);
+            c.priority = p.priority;
+            c.priority_level = p.priority;
+            c.priority_score = p.score;
+            c.priority_reason = p.explanation;
+          }
+        });
+        saveStoredComplaints(complaints);
+        return jsonResponse({ message: `Recalculated priority scores for ${complaints.length} active complaints.` });
+      }
+
+      // 15. Submit Complaint: /api/complaints (POST)
+      if ((path === '/api/complaints' || path === '/api/staff/complaints') && method === 'POST') {
+        let body = {};
+        if (options.body instanceof FormData) {
+          for (const [k, v] of options.body.entries()) {
+            if (typeof v === 'string') body[k] = v;
+          }
+        } else if (options.body) {
+          body = typeof options.body === 'string' ? JSON.parse(options.body) : options.body;
+        }
+
+        const newIdNum = 1000 + complaints.length + 1;
+        const complaintId = `CIVIC-2026-${newIdNum}`;
+        const catRes = clientPredictCategory(body.description || body.title || '');
+        const prioRes = clientCalculatePriority(body.title, body.description, body.location);
+        const dupRes = clientFindDuplicates(body.title || '', body.description || '', complaints);
+        const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+        const newComp = {
+          id: complaints.length + 1,
+          complaint_id: complaintId,
+          title: body.title || 'Untitled Grievance',
+          description: body.description || '',
+          category: body.category && body.category !== 'Auto-Detect with AI' ? body.category : catRes.predicted_category,
+          predicted_category: catRes.predicted_category,
+          category_confidence: catRes.confidence,
+          location: body.location || 'Municipal Sector',
+          landmark: body.landmark || '',
+          image_url: body.image_url || 'https://images.unsplash.com/photo-1541888946425-d0fbb18615f3?w=600&auto=format&fit=crop&q=80',
+          status: 'Pending',
+          priority: prioRes.priority,
+          priority_level: prioRes.priority,
+          priority_score: prioRes.score,
+          priority_reason: prioRes.explanation,
+          sub_scores: prioRes.sub_scores,
+          is_duplicate: dupRes.is_duplicate,
+          duplicate_of_id: dupRes.similar_complaint_id,
+          duplicate_similarity: dupRes.similarity_percentage,
+          citizen_name: body.citizen_name || 'Citizen Portal',
+          citizen_email: body.citizen_email || 'citizen@example.com',
+          created_at: nowStr,
+          updated_at: nowStr,
+          history: [{
+            id: Date.now(),
+            complaint_id: complaintId,
+            previous_status: null,
+            new_status: 'Pending',
+            changed_by: 'Citizen Portal',
+            notes: `Complaint registered. AI Priority: ${prioRes.priority} (${prioRes.score} pts). AI Confidence: ${catRes.confidence}%.`,
+            created_at: nowStr
+          }]
+        };
+
+        complaints.unshift(newComp);
+        saveStoredComplaints(complaints);
+        return jsonResponse({ message: 'Complaint submitted successfully.', complaint: newComp, ...newComp }, 201);
+      }
+
+      return jsonResponse({ message: 'OK', status: 200 });
+    }
+
+    // Global Fetch Interceptor
+    const originalFetch = window.fetch;
+    window.fetch = async function(url, options = {}) {
+      const urlStr = typeof url === 'string' ? url : (url && url.url ? url.url : '');
+      const isLocalFlask = window.location.port === '5000';
+      const hasRemoteBackend = !!configuredBackend;
+
+      // On localhost:5000 or when user specified an external backend URL, attempt real fetch
+      if (isLocalFlask || hasRemoteBackend) {
+        try {
+          let reqUrl = urlStr;
+          if (configuredBackend && urlStr.startsWith('/api')) {
+            reqUrl = configuredBackend.replace(/\/$/, '') + urlStr;
+          }
+          const resp = await originalFetch(reqUrl, options);
+          const ct = (resp && resp.headers && resp.headers.get) ? (resp.headers.get('content-type') || '') : '';
+          if (resp && (resp.ok || ct.includes('application/json'))) {
+            return resp;
+          }
+        } catch (netErr) {
+          console.warn('[CivicEngine] Backend fetch error, switching to in-browser engine:', netErr);
+        }
+      }
+
+      // In-browser mock handler for static GitHub Pages or offline fallback
+      if (urlStr.includes('/api/') || urlStr.startsWith('/api') || urlStr.includes('api/')) {
+        return mockCivicApi(urlStr, options);
+      }
+
+      return originalFetch(url, options);
+    };
+
 
     const CATEGORIES = [
       'Road Damage',
@@ -98,6 +956,15 @@
     // LUCIDE SVG ICONS COMPONENT
     // ==========================================
     function LucideIcon({ name, className = "w-5 h-5", ...props }) {
+      const icons = {
+        server: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+            <line x1="6" y1="6" x2="6.01" y2="6"></line>
+            <line x1="6" y1="18" x2="6.01" y2="18"></line>
+          </svg>
+        ),
       const icons = {
         home: (
           <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
@@ -256,6 +1123,8 @@
       const [currentPage, setCurrentPage] = useState('home');
       const [currentParam, setCurrentParam] = useState(''); // e.g. complaint ID for track or details
       const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+      const [backendModalOpen, setBackendModalOpen] = useState(false);
+      const [customApiUrl, setCustomApiUrl] = useState(localStorage.getItem('CIVIC_BACKEND_URL') || '');
 
       const [currentUser, setCurrentUser] = useState(null);
       const [token, setToken] = useState(localStorage.getItem('civic_token') || '');
@@ -303,7 +1172,7 @@
           fetch(`${API_BASE}/auth/me`, {
             headers: { 'Authorization': `Bearer ${token}` }
           })
-          .then(res => res.ok ? res.json() : null)
+          .then(res => res.ok ? safeJson(res) : null)
           .then(data => {
             if (data && data.user) {
               setCurrentUser(data.user);
@@ -339,6 +1208,71 @@
 
       return (
         <div className="min-h-screen flex bg-slate-50">
+          {/* BACKEND CONNECTION MODAL */}
+          {backendModalOpen && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-scale-in">
+                <div className="flex justify-between items-center mb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+                      <LucideIcon name="server" className="w-4 h-4" />
+                    </div>
+                    <h3 className="font-bold text-base text-slate-900">Backend Server Connection</h3>
+                  </div>
+                  <button onClick={() => setBackendModalOpen(false)} className="text-slate-400 hover:text-slate-600 text-lg">✕</button>
+                </div>
+
+                <p className="text-xs text-slate-500 mb-4 leading-relaxed">
+                  {isGitHubPages
+                    ? "Your portal is hosted on GitHub Pages. It currently runs via the built-in Intelligent Civic Engine with complete local persistence. If you have deployed the Flask backend (on Render, Railway, etc.), you can connect it here."
+                    : "Connected directly to the local Python Flask backend on http://127.0.0.1:5000."}
+                </p>
+
+                <div className="space-y-2 mb-5">
+                  <label className="block text-xs font-bold text-slate-700">Remote Flask API URL</label>
+                  <input
+                    type="url"
+                    placeholder="e.g. https://civic-complaint-system.onrender.com"
+                    value={customApiUrl}
+                    onChange={(e) => setCustomApiUrl(e.target.value)}
+                    className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-xs bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                  />
+                  <p className="text-[11px] text-slate-400">
+                    Leave blank to use the autonomous in-browser engine on GitHub Pages.
+                  </p>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      if (customApiUrl.trim()) {
+                        localStorage.setItem('CIVIC_BACKEND_URL', customApiUrl.trim());
+                      } else {
+                        localStorage.removeItem('CIVIC_BACKEND_URL');
+                      }
+                      setBackendModalOpen(false);
+                      window.location.reload();
+                    }}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-xs shadow-sm transition-all"
+                  >
+                    Save & Reconnect
+                  </button>
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem('CIVIC_BACKEND_URL');
+                      setCustomApiUrl('');
+                      setBackendModalOpen(false);
+                      window.location.reload();
+                    }}
+                    className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-all"
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* TOAST ALERTS */}
           {toast && (
             <div className={`fixed bottom-5 right-5 z-50 flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-2xl border text-xs sm:text-sm font-semibold transition-all transform animate-bounce ${
@@ -555,6 +1489,17 @@
                   </button>
                 )}
 
+                {/* Backend Connection Indicator & Modal Trigger */}
+                <button
+                  type="button"
+                  onClick={() => setBackendModalOpen(true)}
+                  title="Configure backend server connection"
+                  className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all hover:bg-slate-100 bg-slate-50 text-slate-700 border-slate-200"
+                >
+                  <span className={`w-2 h-2 rounded-full ${isGitHubPages && !customApiUrl ? 'bg-blue-500' : 'bg-emerald-500 animate-pulse'}`}></span>
+                  <span>{isGitHubPages && !customApiUrl ? 'GitHub Pages Live' : (customApiUrl ? 'Connected API' : 'Flask Local')}</span>
+                </button>
+
                 {currentUser ? (
                   <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 px-3 py-1 rounded-xl text-xs">
                     <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
@@ -642,7 +1587,7 @@
 
       useEffect(() => {
         fetch(`${API_BASE}/analytics/summary`)
-          .then(res => res.json())
+          .then(res => safeJson(res))
           .then(data => setStats(data))
           .catch(() => {})
           .finally(() => setLoading(false));
@@ -825,7 +1770,7 @@
               })
             });
             if (res.ok) {
-              const data = await res.json();
+              const data = await safeJson(res);
               setAiPreview(data);
             }
           } catch (e) {
@@ -870,7 +1815,7 @@
             method: 'POST',
             body: formData
           });
-          const data = await res.json();
+          const data = await safeJson(res);
           if (!res.ok) throw new Error(data.error || 'Submission failed');
 
           setSubmittedComplaint(data);
@@ -1076,20 +2021,20 @@
                     <div className="text-[11px] text-slate-400 font-medium mb-1">Predicted Category:</div>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="text-xl">{getCategoryIcon(aiPreview.ai_classification.predicted_category)}</span>
+                        <span className="text-xl">{getCategoryIcon(aiPreview?.ai_classification?.predicted_category || aiPreview?.predicted_category || 'Road Damage')}</span>
                         <span className="font-bold text-sm text-white">
-                          {aiPreview.ai_classification.predicted_category}
+                          {aiPreview?.ai_classification?.predicted_category || aiPreview?.predicted_category || 'Assessing...'}
                         </span>
                       </div>
                       <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
-                        {aiPreview.ai_classification.confidence}% Confident
+                        {aiPreview?.ai_classification?.confidence || aiPreview?.category_confidence || 85}% Confident
                       </span>
                     </div>
 
                     <div className="w-full bg-slate-700 h-1.5 rounded-full mt-2.5 overflow-hidden">
                       <div
                         className="bg-emerald-400 h-full rounded-full transition-all duration-500"
-                        style={{ width: `${Math.min(100, Math.max(15, aiPreview.ai_classification.confidence))}%` }}
+                        style={{ width: `${Math.min(100, Math.max(15, aiPreview?.ai_classification?.confidence || aiPreview?.category_confidence || 85))}%` }}
                       ></div>
                     </div>
                   </div>
@@ -1099,48 +2044,48 @@
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-[11px] text-slate-400 font-medium">Priority Prediction:</span>
                       <span className={`text-xs font-extrabold px-2.5 py-0.5 rounded-full ${
-                        aiPreview.priority_assessment.priority === 'Critical' ? 'bg-red-500 text-white' :
-                        aiPreview.priority_assessment.priority === 'High' ? 'bg-orange-500 text-white' :
-                        aiPreview.priority_assessment.priority === 'Medium' ? 'bg-amber-500 text-white' :
+                        (aiPreview?.priority_assessment?.priority || aiPreview?.priority) === 'Critical' ? 'bg-red-500 text-white' :
+                        (aiPreview?.priority_assessment?.priority || aiPreview?.priority) === 'High' ? 'bg-orange-500 text-white' :
+                        (aiPreview?.priority_assessment?.priority || aiPreview?.priority) === 'Medium' ? 'bg-amber-500 text-white' :
                         'bg-blue-600 text-white'
                       }`}>
-                        {aiPreview.priority_assessment.priority} ({aiPreview.priority_assessment.priority_score}/100)
+                        {aiPreview?.priority_assessment?.priority || aiPreview?.priority || 'Medium'} ({aiPreview?.priority_assessment?.priority_score || aiPreview?.priority_score || 50}/100)
                       </span>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-300 font-mono mt-3">
                       <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-700">
                         <div className="text-slate-400 text-[10px]">Safety Risk</div>
-                        <div className="font-bold text-red-400">{aiPreview.priority_assessment.safety_score} / 35</div>
+                        <div className="font-bold text-red-400">{aiPreview?.priority_assessment?.safety_score ?? (aiPreview?.sub_scores?.safety_risk ?? 8.0)} / 35</div>
                       </div>
                       <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-700">
                         <div className="text-slate-400 text-[10px]">Severity</div>
-                        <div className="font-bold text-amber-400">{aiPreview.priority_assessment.severity_score} / 25</div>
+                        <div className="font-bold text-amber-400">{aiPreview?.priority_assessment?.severity_score ?? (aiPreview?.sub_scores?.severity ?? 7.0)} / 25</div>
                       </div>
                       <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-700">
                         <div className="text-slate-400 text-[10px]">Public Impact</div>
-                        <div className="font-bold text-blue-400">{aiPreview.priority_assessment.impact_score} / 25</div>
+                        <div className="font-bold text-blue-400">{aiPreview?.priority_assessment?.impact_score ?? (aiPreview?.sub_scores?.public_impact ?? 7.5)} / 25</div>
                       </div>
                       <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-700">
                         <div className="text-slate-400 text-[10px]">Waiting Time</div>
-                        <div className="font-bold text-purple-400">{aiPreview.priority_assessment.waiting_score} / 15</div>
+                        <div className="font-bold text-purple-400">{aiPreview?.priority_assessment?.waiting_score ?? (aiPreview?.sub_scores?.waiting_time ?? 2.0)} / 15</div>
                       </div>
                     </div>
 
                     <p className="text-[11px] text-slate-300 mt-3 italic border-t border-slate-700/60 pt-2 leading-relaxed">
-                      "{aiPreview.priority_assessment.priority_reason}"
+                      "{aiPreview?.priority_assessment?.priority_reason || aiPreview?.priority_reason || 'Multi-factor priority score calculated.'}"
                     </p>
                   </div>
 
                   {/* Duplicate Detection Alert */}
-                  {aiPreview.duplicate_detection.is_duplicate_likely && (
+                  {Boolean(aiPreview?.duplicate_detection?.is_duplicate_likely || aiPreview?.duplicate_detection?.is_duplicate || aiPreview?.is_duplicate) && (
                     <div className="bg-amber-950/70 border border-amber-500/50 rounded-xl p-3.5 text-xs text-amber-200">
                       <div className="font-bold flex items-center gap-1.5 text-amber-400 mb-1">
                         <LucideIcon name="alertTriangle" className="w-4 h-4" />
                         <span>Potential Duplicate Complaint Detected</span>
                       </div>
                       <p className="text-[11px] leading-relaxed">
-                        A matching complaint exists: <strong>{aiPreview.duplicate_detection.top_match?.complaint_id}</strong> ({aiPreview.duplicate_detection.top_similarity}% match).
+                        A matching complaint exists: <strong>{aiPreview?.duplicate_detection?.top_match?.complaint_id || aiPreview?.duplicate_detection?.similar_complaint_id || 'Existing Ticket'}</strong> ({aiPreview?.duplicate_detection?.top_similarity || aiPreview?.duplicate_detection?.similarity_percentage || 80}% match).
                         Staff will review this report alongside existing tickets.
                       </p>
                     </div>
@@ -1248,7 +2193,7 @@
 
         try {
           const res = await fetch(`${API_BASE}/complaints/track/${id}`);
-          const data = await res.json();
+          const data = await safeJson(res);
           if (!res.ok) throw new Error(data.error || 'Complaint not found');
           setComplaint(data.complaint);
         } catch (err) {
@@ -1477,7 +2422,7 @@
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ name, email, password, phone, role: 'citizen' })
             });
-            const data = await res.json();
+            const data = await safeJson(res);
             if (!res.ok) throw new Error(data.error || 'Registration failed');
             onLoginSuccess(data.user, data.token);
           } else {
@@ -1486,7 +2431,7 @@
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ email, password })
             });
-            const data = await res.json();
+            const data = await safeJson(res);
             if (!res.ok) throw new Error(data.error || 'Invalid credentials');
             onLoginSuccess(data.user, data.token);
           }
@@ -1651,8 +2596,8 @@
             fetch(`${API_BASE}/analytics/summary`)
           ]);
 
-          const compData = await compRes.json();
-          const sumData = await sumRes.json();
+          const compData = await safeJson(compRes);
+          const sumData = await safeJson(sumRes);
 
           setComplaints(compData.complaints || []);
           setSummary(sumData);
@@ -1678,7 +2623,7 @@
               ...(authTok ? { 'Authorization': `Bearer ${authTok}` } : {})
             }
           });
-          const data = await res.json();
+          const data = await safeJson(res);
           if (!res.ok) throw new Error(data.error || 'Failed to recalculate priorities');
           showToast(data.message, 'success');
           fetchDashboardData();
@@ -1916,7 +2861,7 @@
         setLoading(true);
         try {
           const res = await fetch(`${API_BASE}/staff/complaints/${complaintId}`);
-          const data = await res.json();
+          const data = await safeJson(res);
           if (!res.ok) throw new Error(data.error || 'Failed to load details');
           setComplaint(data.complaint);
           setNewStatus(data.complaint.status);
@@ -1948,7 +2893,7 @@
               notes: statusNotes || 'Grievance verified by official municipal review.'
             })
           });
-          const data = await res.json();
+          const data = await safeJson(res);
           if (!res.ok) throw new Error(data.error || 'Failed to verify complaint');
           showToast(data.message, 'success');
           setStatusNotes('');
@@ -1977,7 +2922,7 @@
               changed_by: currentUser?.name || 'Municipal Officer'
             })
           });
-          const data = await res.json();
+          const data = await safeJson(res);
           if (!res.ok) throw new Error(data.error || 'Failed to reject complaint');
           showToast(data.message, 'success');
           setStatusNotes('');
@@ -2007,7 +2952,7 @@
               changed_by: currentUser?.name || 'Municipal Officer'
             })
           });
-          const data = await res.json();
+          const data = await safeJson(res);
           if (!res.ok) throw new Error(data.error || 'Failed to update status');
 
           showToast(data.message, 'success');
@@ -2036,7 +2981,7 @@
               duplicate_similarity: sim || 0.0
             })
           });
-          const data = await res.json();
+          const data = await safeJson(res);
           showToast(data.message, 'success');
           fetchDetails();
         } catch (e) {
@@ -2369,8 +3314,8 @@
             fetch(`${API_BASE}/analytics/summary`),
             fetch(`${API_BASE}/analytics/charts`)
           ]);
-          const sumData = await sumRes.json();
-          const cData = await chartRes.json();
+          const sumData = await safeJson(sumRes);
+          const cData = await safeJson(chartRes);
           setSummary(sumData);
           setChartData(cData);
         } catch (e) {
