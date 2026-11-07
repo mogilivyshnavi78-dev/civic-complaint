@@ -1,0 +1,3556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Intelligent Civic Complaint Prioritization System</title>
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            civic: {
+              50: '#f0f7ff',
+              100: '#e0effe',
+              200: '#bae0fd',
+              500: '#0284c7',
+              600: '#0369a1',
+              700: '#075985',
+              800: '#0c4a6e',
+              900: '#0a3550',
+              950: '#062033',
+            },
+            govnavy: '#0b233a',
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- React 18 & ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel Standalone -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Chart.js 4 -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+
+  <style>
+    body {
+      background-color: #f8fafc;
+      font-family: 'Inter', sans-serif;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+    .line-clamp-1 {
+      display: -webkit-box;
+      -webkit-line-clamp: 1;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .line-clamp-2 {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+  </style>
+</head>
+<body class="text-slate-800 antialiased min-h-screen flex flex-col selection:bg-blue-100 selection:text-blue-900">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+        // =========================================================================
+    // HYBRID RUNTIME ENGINE (Supports both Live Flask Backend & GitHub Pages)
+    // =========================================================================
+    // =========================================================================
+    // CONFIGURATION: DEPLOYED FLASK BACKEND URL
+    // =========================================================================
+    // If you deployed your Flask backend on Render, Railway, etc., paste the URL below:
+    // e.g. const DEPLOYED_BACKEND_URL = 'https://civic-complaint-system.onrender.com';
+    const DEPLOYED_BACKEND_URL = '';
+
+    const isGitHubPages = window.location.hostname.includes('github.io');
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('backend')) {
+      localStorage.setItem('CIVIC_BACKEND_URL', urlParams.get('backend').trim());
+    }
+    const configuredBackend = localStorage.getItem('CIVIC_BACKEND_URL') || DEPLOYED_BACKEND_URL || '';
+    let API_BASE = configuredBackend ? configuredBackend.replace(/\/$/, '') + '/api' : '/api';
+
+    // Safe JSON parser: Never crashes with 'Unexpected token <'
+    async function safeJson(res) {
+      if (!res) return null;
+      const ct = res.headers && res.headers.get ? (res.headers.get('content-type') || '') : '';
+      if (ct.includes('application/json')) {
+        return await safeJson(res);
+      }
+      const rawText = await res.text();
+      try {
+        return JSON.parse(rawText);
+      } catch (e) {
+        if (rawText.trim().startsWith('<') || rawText.includes('<!DOCTYPE') || rawText.includes('<html')) {
+          throw new Error(`The backend returned an HTML page (HTTP ${res.status}). Verify your Flask backend deployment URL.`);
+        }
+        throw new Error(rawText || `Request failed with status ${res.status}`);
+      }
+    }
+
+    // 15 Default Pre-Seeded Realistic Complaints matching Municipal DB
+    const INITIAL_CIVIC_DATA = [
+      {
+        id: 1,
+        complaint_id: "CIVIC-2026-1001",
+        title: "Exposed sparking live electric wire from damaged lamppost",
+        description: "A streetlight pole was hit by a truck. The fixture is hanging by bare live wires and sparking during drizzle right outside City Children Hospital. Extreme electric shock and fatal accident hazard.",
+        category: "Broken Streetlights",
+        predicted_category: "Broken Streetlights",
+        category_confidence: 96.5,
+        location: "Corner of 4th Avenue and Pine Street",
+        landmark: "Directly outside City Children Hospital Gate 2",
+        image_url: "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=600&auto=format&fit=crop&q=80",
+        status: "Pending",
+        priority: "High",
+        priority_level: "High",
+        priority_score: 78.8,
+        priority_reason: "Assigned High Priority with a weighted score of 78.8/100. Safety Risk: 9.0/10 (High-risk life hazard detected: electric shock, live wire, sparking; Proximity to sensitive public zone (hospital)). Severity: 6.5/10. Public Impact: 7.5/10. Waiting Time Escalation: 2.5/10.",
+        sub_scores: { safety_risk: 9.0, severity: 6.5, public_impact: 7.5, waiting_time: 2.5 },
+        safety_score: 9.0, severity_score: 6.5, impact_score: 7.5, waiting_score: 2.5,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Rajesh Kumar", citizen_email: "citizen@example.com", citizen_phone: "+1 (555) 234-5678",
+        created_at: "2026-11-05 09:30:00", updated_at: "2026-11-05 09:30:00",
+        history: [{ id: 1, complaint_id: "CIVIC-2026-1001", previous_status: null, new_status: "Pending", changed_by: "Citizen Portal", notes: "Complaint registered. AI Priority: High (78.8 pts). AI Category Confidence: 96.5%.", created_at: "2026-11-05 09:30:00" }]
+      },
+      {
+        id: 2,
+        complaint_id: "CIVIC-2026-1002",
+        title: "Deep road collapse and sinkhole on Grand Trunk Highway",
+        description: "A massive sinkhole approximately 5 feet wide and 3 feet deep has opened up on the right lane of Grand Trunk Highway near the metro flyover. Several vehicles have sustained severe wheel damage, imminent risk of vehicle overturn.",
+        category: "Road Damage",
+        predicted_category: "Road Damage",
+        category_confidence: 94.2,
+        location: "Grand Trunk Highway, Near Metro Pillar 114",
+        landmark: "Opposite City Center Mall entrance",
+        image_url: "https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?w=600&auto=format&fit=crop&q=80",
+        status: "Verified",
+        priority: "High",
+        priority_level: "High",
+        priority_score: 77.2,
+        priority_reason: "Assigned High Priority with a weighted score of 77.2/100. Safety Risk: 8.5/10 (High-risk life hazard detected: sinkhole, road collapse). Severity: 7.0/10. Public Impact: 8.0/10 (Located on high-traffic artery (highway)). Waiting Time Escalation: 4.5/10.",
+        sub_scores: { safety_risk: 8.5, severity: 7.0, public_impact: 8.0, waiting_time: 4.5 },
+        safety_score: 8.5, severity_score: 7.0, impact_score: 8.0, waiting_score: 4.5,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Sarah Jenkins", citizen_email: "sarah.j@example.com", citizen_phone: "+1 (555) 876-5432",
+        created_at: "2026-11-02 11:15:00", updated_at: "2026-11-03 14:00:00",
+        history: [
+          { id: 2, complaint_id: "CIVIC-2026-1002", previous_status: null, new_status: "Pending", changed_by: "Citizen Portal", notes: "Complaint registered. AI Priority: High (77.2 pts).", created_at: "2026-11-02 11:15:00" },
+          { id: 3, complaint_id: "CIVIC-2026-1002", previous_status: "Pending", new_status: "Verified", changed_by: "Officer David Vance", notes: "Field inspection confirmed severe road cave-in.", created_at: "2026-11-03 14:00:00" }
+        ]
+      },
+      {
+        id: 3,
+        complaint_id: "CIVIC-2026-1003",
+        title: "Main municipal water supply conduit ruptured and gushing",
+        description: "High pressure drinking water is bursting out like a geyser from the primary distribution pipe. Millions of gallons of clean drinking water are flooding the entire boulevard and homes have zero tap pressure.",
+        category: "Water Leakage",
+        predicted_category: "Water Leakage",
+        category_confidence: 91.8,
+        location: "Central Avenue, Sector 9",
+        landmark: "Near Municipal Water Booster Station",
+        image_url: "https://images.unsplash.com/photo-1584467735871-8e85353a8413?w=600&auto=format&fit=crop&q=80",
+        status: "In Progress",
+        priority: "Low",
+        priority_level: "Low",
+        priority_score: 38.5,
+        priority_reason: "Assigned Low Priority with a weighted score of 38.5/100. Safety Risk: 2.5/10. Severity: 5.5/10. Public Impact: 5.0/10. Waiting Time Escalation: 2.0/10.",
+        sub_scores: { safety_risk: 2.5, severity: 5.5, public_impact: 5.0, waiting_time: 2.0 },
+        safety_score: 2.5, severity_score: 5.5, impact_score: 5.0, waiting_score: 2.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Rajesh Kumar", citizen_email: "citizen@example.com", citizen_phone: "+1 (555) 234-5678",
+        created_at: "2026-11-04 08:00:00", updated_at: "2026-11-05 10:30:00",
+        history: [
+          { id: 4, complaint_id: "CIVIC-2026-1003", previous_status: null, new_status: "Pending", changed_by: "Citizen Portal", notes: "Registered.", created_at: "2026-11-04 08:00:00" },
+          { id: 5, complaint_id: "CIVIC-2026-1003", previous_status: "Pending", new_status: "Verified", changed_by: "Officer David Vance", notes: "Inspection completed.", created_at: "2026-11-04 16:00:00" },
+          { id: 6, complaint_id: "CIVIC-2026-1003", previous_status: "Verified", new_status: "In Progress", changed_by: "Inspector Elena Rostova", notes: "Hydro-excavation team dispatched.", created_at: "2026-11-05 10:30:00" }
+        ]
+      },
+      {
+        id: 4,
+        complaint_id: "CIVIC-2026-1004",
+        title: "Massive uncollected garbage accumulation rotting outside school",
+        description: "The public community dumpsters have not been emptied for 12 days. An enormous mound of decaying domestic and food waste has spilled across the pavement. Unbearable stench, swarms of flies and stray dogs blocking school gate.",
+        category: "Garbage Accumulation",
+        predicted_category: "Garbage Accumulation",
+        category_confidence: 95.0,
+        location: "Greenwood Street, Block C",
+        landmark: "Directly opposite Greenwood Public Elementary School",
+        image_url: "https://images.unsplash.com/photo-1605600659908-0ef719419d41?w=600&auto=format&fit=crop&q=80",
+        status: "Pending",
+        priority: "Medium",
+        priority_level: "Medium",
+        priority_score: 42.0,
+        priority_reason: "Assigned Medium Priority with a weighted score of 42.0/100. Safety Risk: 3.5/10. Severity: 4.5/10. Public Impact: 4.0/10. Waiting Time Escalation: 6.0/10.",
+        sub_scores: { safety_risk: 3.5, severity: 4.5, public_impact: 4.0, waiting_time: 6.0 },
+        safety_score: 3.5, severity_score: 4.5, impact_score: 4.0, waiting_score: 6.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Sarah Jenkins", citizen_email: "sarah.j@example.com", citizen_phone: "+1 (555) 876-5432",
+        created_at: "2026-10-30 14:00:00", updated_at: "2026-10-30 14:00:00",
+        history: [{ id: 7, complaint_id: "CIVIC-2026-1004", previous_status: null, new_status: "Pending", changed_by: "Citizen Portal", notes: "Registered.", created_at: "2026-10-30 14:00:00" }]
+      },
+      {
+        id: 5,
+        complaint_id: "CIVIC-2026-1005",
+        title: "Black sewage water overflowing from choked drain into market",
+        description: "The underground stormwater and sewer line is completely clogged with hardened sludge and debris. Knee-deep foul sewage is backing up into grocery stores and walkway causing severe sanitary hazard.",
+        category: "Blocked Drainage",
+        predicted_category: "Blocked Drainage",
+        category_confidence: 93.4,
+        location: "Market Road, Sector 15 Commercial Hub",
+        landmark: "Next to Central Vegetable Market",
+        image_url: "https://images.unsplash.com/photo-1541888946425-d0fbb18615f3?w=600&auto=format&fit=crop&q=80",
+        status: "In Progress",
+        priority: "Medium",
+        priority_level: "Medium",
+        priority_score: 49.2,
+        priority_reason: "Assigned Medium Priority with a weighted score of 49.2/100. Safety Risk: 4.0/10. Severity: 5.5/10. Public Impact: 5.5/10. Waiting Time Escalation: 4.0/10.",
+        sub_scores: { safety_risk: 4.0, severity: 5.5, public_impact: 5.5, waiting_time: 4.0 },
+        safety_score: 4.0, severity_score: 5.5, impact_score: 5.5, waiting_score: 4.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Rajesh Kumar", citizen_email: "citizen@example.com", citizen_phone: "+1 (555) 234-5678",
+        created_at: "2026-11-01 16:30:00", updated_at: "2026-11-02 12:00:00",
+        history: [
+          { id: 8, complaint_id: "CIVIC-2026-1005", previous_status: null, new_status: "Pending", changed_by: "Citizen Portal", notes: "Registered.", created_at: "2026-11-01 16:30:00" },
+          { id: 9, complaint_id: "CIVIC-2026-1005", previous_status: "Pending", new_status: "In Progress", changed_by: "Officer David Vance", notes: "Suction tanker deployed.", created_at: "2026-11-02 12:00:00" }
+        ]
+      },
+      {
+        id: 6,
+        complaint_id: "CIVIC-2026-1006",
+        title: "Deep road collapse and sinkhole on Grand Trunk Highway near Metro",
+        description: "A massive sinkhole approximately 5 feet wide and 3 feet deep has opened up on Grand Trunk Highway near the metro flyover. Several vehicles have sustained wheel damage.",
+        category: "Road Damage",
+        predicted_category: "Road Damage",
+        category_confidence: 94.0,
+        location: "Grand Trunk Highway, Near Metro Pillar 114",
+        landmark: "Near City Center Mall",
+        image_url: "https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?w=600&auto=format&fit=crop&q=80",
+        status: "Pending",
+        priority: "Medium",
+        priority_level: "Medium",
+        priority_score: 56.0,
+        priority_reason: "Assigned Medium Priority with a weighted score of 56.0/100. High similarity duplicate flag.",
+        sub_scores: { safety_risk: 6.0, severity: 5.0, public_impact: 6.0, waiting_time: 1.0 },
+        safety_score: 6.0, severity_score: 5.0, impact_score: 6.0, waiting_score: 1.0,
+        is_duplicate: 1, duplicate_of_id: "CIVIC-2026-1002", duplicate_similarity: 88.1,
+        citizen_name: "Rajesh Kumar", citizen_email: "citizen@example.com", citizen_phone: "+1 (555) 234-5678",
+        created_at: "2026-11-05 13:00:00", updated_at: "2026-11-05 13:00:00",
+        history: [{ id: 10, complaint_id: "CIVIC-2026-1006", previous_status: null, new_status: "Pending", changed_by: "Citizen Portal", notes: "Potential duplicate identified (88.1% match with CIVIC-2026-1002).", created_at: "2026-11-05 13:00:00" }]
+      },
+      {
+        id: 7,
+        complaint_id: "CIVIC-2026-1007",
+        title: "Five consecutive streetlights completely dead on Ring Road curve",
+        description: "A stretch of 5 streetlamps is totally non-functional creating a dangerous dark blind spot on the sharp curve of Outer Ring Road. Drivers cannot see pedestrians or divider edges at night.",
+        category: "Broken Streetlights",
+        predicted_category: "Broken Streetlights",
+        category_confidence: 92.5,
+        location: "Outer Ring Road, Km marker 14",
+        landmark: "Between Railway Overbridge and North Exit",
+        image_url: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=600&auto=format&fit=crop&q=80",
+        status: "Verified",
+        priority: "Medium",
+        priority_level: "Medium",
+        priority_score: 55.8,
+        priority_reason: "Assigned Medium Priority with a weighted score of 55.8/100.",
+        sub_scores: { safety_risk: 5.5, severity: 4.5, public_impact: 6.0, waiting_time: 7.0 },
+        safety_score: 5.5, severity_score: 4.5, impact_score: 6.0, waiting_score: 7.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Sarah Jenkins", citizen_email: "sarah.j@example.com", citizen_phone: "+1 (555) 876-5432",
+        created_at: "2026-10-29 20:00:00", updated_at: "2026-10-31 11:00:00",
+        history: [{ id: 11, complaint_id: "CIVIC-2026-1007", previous_status: "Pending", new_status: "Verified", changed_by: "Inspector Elena Rostova", notes: "Field verified dark zone.", created_at: "2026-10-31 11:00:00" }]
+      },
+      {
+        id: 8,
+        complaint_id: "CIVIC-2026-1008",
+        title: "Steady water pipe fracture leaking drinking water onto walkway",
+        description: "Drinking water pipeline under the pedestrian footpath has developed a fissure. Potable water is steadily bubbling up and eroding the brick walkway near the bus terminus.",
+        category: "Water Leakage",
+        predicted_category: "Water Leakage",
+        category_confidence: 88.0,
+        location: "Station Road, Bus Terminus Bay 3",
+        landmark: "Opposite Railway Station Clock Tower",
+        image_url: "https://images.unsplash.com/photo-1584467735871-8e85353a8413?w=600&auto=format&fit=crop&q=80",
+        status: "Resolved",
+        priority: "Medium",
+        priority_level: "Medium",
+        priority_score: 41.0,
+        priority_reason: "Resolved. Assigned Medium Priority.",
+        sub_scores: { safety_risk: 2.5, severity: 4.0, public_impact: 4.5, waiting_time: 10.0 },
+        safety_score: 2.5, severity_score: 4.0, impact_score: 4.5, waiting_score: 10.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Rajesh Kumar", citizen_email: "citizen@example.com", citizen_phone: "+1 (555) 234-5678",
+        created_at: "2026-10-22 09:00:00", updated_at: "2026-10-25 15:30:00",
+        history: [{ id: 12, complaint_id: "CIVIC-2026-1008", previous_status: "In Progress", new_status: "Resolved", changed_by: "Officer David Vance", notes: "Valve replaced and brick pavers restored.", created_at: "2026-10-25 15:30:00" }]
+      },
+      {
+        id: 9,
+        complaint_id: "CIVIC-2026-1009",
+        title: "Construction debris and mixed waste dumped on residential corner",
+        description: "Unidentified contractors have dumped 3 truckloads of broken plaster, tiles and domestic bags on the corner of 7th Cross. Dust is blowing into residential homes.",
+        category: "Garbage Accumulation",
+        predicted_category: "Garbage Accumulation",
+        category_confidence: 90.0,
+        location: "7th Cross Road, Indira Enclave",
+        landmark: "Adjacent to Community Park Boundary",
+        image_url: "https://images.unsplash.com/photo-1605600659908-0ef719419d41?w=600&auto=format&fit=crop&q=80",
+        status: "Resolved",
+        priority: "Medium",
+        priority_level: "Medium",
+        priority_score: 41.8,
+        priority_reason: "Resolved. Assigned Medium Priority.",
+        sub_scores: { safety_risk: 3.0, severity: 4.0, public_impact: 4.0, waiting_time: 10.0 },
+        safety_score: 3.0, severity_score: 4.0, impact_score: 4.0, waiting_score: 10.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Sarah Jenkins", citizen_email: "sarah.j@example.com", citizen_phone: "+1 (555) 876-5432",
+        created_at: "2026-10-19 14:00:00", updated_at: "2026-10-22 17:00:00",
+        history: [{ id: 13, complaint_id: "CIVIC-2026-1009", previous_status: "In Progress", new_status: "Resolved", changed_by: "Officer David Vance", notes: "Debris cleared via JCB loader.", created_at: "2026-10-22 17:00:00" }]
+      },
+      {
+        id: 10,
+        complaint_id: "CIVIC-2026-1010",
+        title: "Clogged stormwater gutter causing waterlogging after rain",
+        description: "Roadside gutter is filled with fallen leaves and dirt. Even mild rain causes water to pool for 24 hours in front of residential apartments.",
+        category: "Blocked Drainage",
+        predicted_category: "Blocked Drainage",
+        category_confidence: 89.5,
+        location: "Silverwood Lane, Sector 4",
+        landmark: "Outside Sunrise Apartments Gate 1",
+        image_url: "https://images.unsplash.com/photo-1541888946425-d0fbb18615f3?w=600&auto=format&fit=crop&q=80",
+        status: "Resolved",
+        priority: "Medium",
+        priority_level: "Medium",
+        priority_score: 41.8,
+        priority_reason: "Resolved. Assigned Medium Priority.",
+        sub_scores: { safety_risk: 3.0, severity: 4.0, public_impact: 4.0, waiting_time: 10.0 },
+        safety_score: 3.0, severity_score: 4.0, impact_score: 4.0, waiting_score: 10.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Rajesh Kumar", citizen_email: "citizen@example.com", citizen_phone: "+1 (555) 234-5678",
+        created_at: "2026-10-15 10:00:00", updated_at: "2026-10-18 11:30:00",
+        history: [{ id: 14, complaint_id: "CIVIC-2026-1010", previous_status: "In Progress", new_status: "Resolved", changed_by: "Inspector Elena Rostova", notes: "Culvert desilted completely.", created_at: "2026-10-18 11:30:00" }]
+      },
+      {
+        id: 11,
+        complaint_id: "CIVIC-2026-1011",
+        title: "Cracked road surface with multiple minor potholes on 3rd Lane",
+        description: "The asphalt has worn down over the last year causing multiple small potholes. Bicycles and scooters experience bumpy rides, needs asphalt patching.",
+        category: "Road Damage",
+        predicted_category: "Road Damage",
+        category_confidence: 93.0,
+        location: "3rd Lane, Rose Garden Colony",
+        landmark: "Near Sector Post Office",
+        image_url: "https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?w=600&auto=format&fit=crop&q=80",
+        status: "Pending",
+        priority: "Low",
+        priority_level: "Low",
+        priority_score: 27.2,
+        priority_reason: "Assigned Low Priority with a weighted score of 27.2/100.",
+        sub_scores: { safety_risk: 2.0, severity: 2.5, public_impact: 3.0, waiting_time: 3.0 },
+        safety_score: 2.0, severity_score: 2.5, impact_score: 3.0, waiting_score: 3.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Sarah Jenkins", citizen_email: "sarah.j@example.com", citizen_phone: "+1 (555) 876-5432",
+        created_at: "2026-11-03 16:00:00", updated_at: "2026-11-03 16:00:00",
+        history: [{ id: 15, complaint_id: "CIVIC-2026-1011", previous_status: null, new_status: "Pending", changed_by: "Citizen Portal", notes: "Registered.", created_at: "2026-11-03 16:00:00" }]
+      },
+      {
+        id: 12,
+        complaint_id: "CIVIC-2026-1012",
+        title: "Flickering LED streetlight pole outside community hall",
+        description: "The LED streetlight outside the community hall turns on and off erratically every 5 seconds. Extremely annoying strobe effect at night.",
+        category: "Broken Streetlights",
+        predicted_category: "Broken Streetlights",
+        category_confidence: 91.0,
+        location: "Civic Center Road, Ward 12",
+        landmark: "In front of Ward 12 Community Hall",
+        image_url: "",
+        status: "Rejected",
+        priority: "Medium",
+        priority_level: "Medium",
+        priority_score: 43.5,
+        priority_reason: "Rejected. Private community hall property outside municipal charter.",
+        sub_scores: { safety_risk: 3.0, severity: 3.5, public_impact: 4.0, waiting_time: 8.0 },
+        safety_score: 3.0, severity_score: 3.5, impact_score: 4.0, waiting_score: 8.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Rajesh Kumar", citizen_email: "citizen@example.com", citizen_phone: "+1 (555) 234-5678",
+        created_at: "2026-10-27 19:30:00", updated_at: "2026-10-28 10:00:00",
+        history: [{ id: 16, complaint_id: "CIVIC-2026-1012", previous_status: "Pending", new_status: "Rejected", changed_by: "Officer David Vance", notes: "Private property installation.", created_at: "2026-10-28 10:00:00" }]
+      },
+      {
+        id: 13,
+        complaint_id: "CIVIC-2026-1013",
+        title: "Clean water gushing from damaged fire hydrant valve",
+        description: "A fire hydrant valve seems to have been hit or loosened. A continuous stream of potable water is flowing across the sidewalk into the storm gutter.",
+        category: "Water Leakage",
+        predicted_category: "Water Leakage",
+        category_confidence: 90.0,
+        location: "Commercial Street, Block B",
+        landmark: "Beside Apex Bank ATM",
+        image_url: "https://images.unsplash.com/photo-1584467735871-8e85353a8413?w=600&auto=format&fit=crop&q=80",
+        status: "Verified",
+        priority: "Low",
+        priority_level: "Low",
+        priority_score: 36.0,
+        priority_reason: "Assigned Low Priority with a weighted score of 36.0/100.",
+        sub_scores: { safety_risk: 2.0, severity: 4.0, public_impact: 4.5, waiting_time: 3.0 },
+        safety_score: 2.0, severity_score: 4.0, impact_score: 4.5, waiting_score: 3.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Sarah Jenkins", citizen_email: "sarah.j@example.com", citizen_phone: "+1 (555) 876-5432",
+        created_at: "2026-11-03 14:00:00", updated_at: "2026-11-04 10:00:00",
+        history: [{ id: 17, complaint_id: "CIVIC-2026-1013", previous_status: "Pending", new_status: "Verified", changed_by: "Officer David Vance", notes: "Hydrant inspected.", created_at: "2026-11-04 10:00:00" }]
+      },
+      {
+        id: 14,
+        complaint_id: "CIVIC-2026-1014",
+        title: "Rotting food waste dumped in open plot breeding mosquitoes",
+        description: "Commercial restaurant garbage bags dumped in an open empty plot. Strong putrid odor and severe mosquito breeding affecting adjoining households.",
+        category: "Garbage Accumulation",
+        predicted_category: "Garbage Accumulation",
+        category_confidence: 92.0,
+        location: "Oak Street, Plot 45",
+        landmark: "Behind Food Plaza Restaurant",
+        image_url: "",
+        status: "Pending",
+        priority: "Low",
+        priority_level: "Low",
+        priority_score: 32.2,
+        priority_reason: "Assigned Low Priority with a weighted score of 32.2/100.",
+        sub_scores: { safety_risk: 3.0, severity: 3.0, public_impact: 3.0, waiting_time: 2.0 },
+        safety_score: 3.0, severity_score: 3.0, impact_score: 3.0, waiting_score: 2.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Rajesh Kumar", citizen_email: "citizen@example.com", citizen_phone: "+1 (555) 234-5678",
+        created_at: "2026-11-04 11:00:00", updated_at: "2026-11-04 11:00:00",
+        history: [{ id: 18, complaint_id: "CIVIC-2026-1014", previous_status: null, new_status: "Pending", changed_by: "Citizen Portal", notes: "Registered.", created_at: "2026-11-04 11:00:00" }]
+      },
+      {
+        id: 15,
+        complaint_id: "CIVIC-2026-1015",
+        title: "Open missing manhole cover on unlit street corner",
+        description: "The cast iron manhole cover on the sewer chamber is completely missing. It is an open 8-foot drop on a poorly lit corner. Severe fatal accident hazard for pedestrians and cyclists.",
+        category: "Blocked Drainage",
+        predicted_category: "Blocked Drainage",
+        category_confidence: 95.0,
+        location: "11th Main, Cross 3, Gandhi Nagar",
+        landmark: "Near Govt Primary Health Center",
+        image_url: "https://images.unsplash.com/photo-1541888946425-d0fbb18615f3?w=600&auto=format&fit=crop&q=80",
+        status: "Pending",
+        priority: "High",
+        priority_level: "High",
+        priority_score: 71.0,
+        priority_reason: "Assigned High Priority with a weighted score of 71.0/100. Safety Risk: 9.0/10 (open manhole hazard).",
+        sub_scores: { safety_risk: 9.0, severity: 6.0, public_impact: 6.5, waiting_time: 1.0 },
+        safety_score: 9.0, severity_score: 6.0, impact_score: 6.5, waiting_score: 1.0,
+        is_duplicate: 0, duplicate_of_id: null, duplicate_similarity: 0.0,
+        citizen_name: "Sarah Jenkins", citizen_email: "sarah.j@example.com", citizen_phone: "+1 (555) 876-5432",
+        created_at: "2026-11-05 17:00:00", updated_at: "2026-11-05 17:00:00",
+        history: [{ id: 19, complaint_id: "CIVIC-2026-1015", previous_status: null, new_status: "Pending", changed_by: "Citizen Portal", notes: "Registered.", created_at: "2026-11-05 17:00:00" }]
+      }
+    ];
+
+    // Helper functions for client-side persistence
+    function getStoredComplaints() {
+      const stored = localStorage.getItem('civic_complaints_v1');
+      if (stored) {
+        try { return JSON.parse(stored); } catch (e) {}
+      }
+      localStorage.setItem('civic_complaints_v1', JSON.stringify(INITIAL_CIVIC_DATA));
+      return INITIAL_CIVIC_DATA;
+    }
+
+    function saveStoredComplaints(complaints) {
+      localStorage.setItem('civic_complaints_v1', JSON.stringify(complaints));
+    }
+
+    // Client-side NLP Category Predictor
+    function clientPredictCategory(text) {
+      const t = (text || '').toLowerCase();
+      const scores = {
+        'Road Damage': 0,
+        'Garbage Accumulation': 0,
+        'Water Leakage': 0,
+        'Blocked Drainage': 0,
+        'Broken Streetlights': 0
+      };
+
+      const kw = {
+        'Road Damage': ['pothole', 'sinkhole', 'crater', 'asphalt', 'road', 'tar', 'paver', 'curb', 'divider', 'bitumen', 'tarmac', 'fissure', 'crack', 'pavement'],
+        'Garbage Accumulation': ['garbage', 'trash', 'dumpster', 'waste', 'litter', 'debris', 'rotting', 'flies', 'stench', 'smell', 'dump', 'food waste'],
+        'Water Leakage': ['water', 'pipe', 'pipeline', 'leak', 'gushing', 'burst', 'hydrant', 'potable', 'drinking water', 'tap', 'flooding', 'conduit'],
+        'Blocked Drainage': ['drain', 'drainage', 'sewage', 'sewer', 'manhole', 'sludge', 'gutter', 'waterlog', 'culvert', 'choked', 'clogged'],
+        'Broken Streetlights': ['streetlight', 'light', 'lamp', 'lamppost', 'sparking', 'wire', 'dark', 'bulb', 'pole', 'led', 'flicker', 'blackout']
+      };
+
+      for (const [cat, words] of Object.entries(kw)) {
+        for (const w of words) {
+          if (t.includes(w)) scores[cat] += 2;
+        }
+      }
+
+      let bestCat = 'Road Damage';
+      let maxScore = -1;
+      for (const [cat, sc] of Object.entries(scores)) {
+        if (sc > maxScore) { maxScore = sc; bestCat = cat; }
+      }
+      const confidence = maxScore > 0 ? Math.min(96.5, 60 + maxScore * 8) : 55.0;
+      return { predicted_category: bestCat, confidence };
+    }
+
+    // Client-side 4-Dimension Priority Calculator
+    function clientCalculatePriority(title, description, location) {
+      const text = ((title || '') + ' ' + (description || '') + ' ' + (location || '')).toLowerCase();
+
+      let safety = 2.0;
+      if (text.includes('live wire') || text.includes('sparking') || text.includes('electric shock') || text.includes('fatal') || text.includes('sinkhole') || text.includes('open manhole')) {
+        safety = 9.0;
+      } else if (text.includes('hospital') || text.includes('school') || text.includes('children') || text.includes('hazard')) {
+        safety = 6.5;
+      }
+
+      let severity = 3.0;
+      if (text.includes('burst') || text.includes('completely blocked') || text.includes('gushing') || text.includes('knee-deep') || text.includes('massive')) {
+        severity = 7.5;
+      } else if (text.includes('overflowing') || text.includes('deep') || text.includes('damaged')) {
+        severity = 5.5;
+      }
+
+      let impact = 4.0;
+      if (text.includes('highway') || text.includes('artery') || text.includes('main road') || text.includes('ring road') || text.includes('metro') || text.includes('market')) {
+        impact = 7.5;
+      } else if (text.includes('station') || text.includes('avenue') || text.includes('bus')) {
+        impact = 6.0;
+      }
+
+      const waiting = 1.0;
+      const score = Math.min(100, Math.max(10, Math.round(((safety * 3.5) + (severity * 2.5) + (impact * 2.5) + (waiting * 1.5)) * 10) / 10));
+
+      let priority = 'Low';
+      if (score >= 80) priority = 'Critical';
+      else if (score >= 60) priority = 'High';
+      else if (score >= 40) priority = 'Medium';
+
+      return {
+        score,
+        priority,
+        explanation: `Assigned ${priority} Priority with a score of ${score}/100. Safety: ${safety}/10, Severity: ${severity}/10, Public Impact: ${impact}/10, Waiting Escalation: ${waiting}/10.`,
+        sub_scores: { safety_risk: safety, severity, public_impact: impact, waiting_time: waiting }
+      };
+    }
+
+    // Client-side Duplicate Detector
+    function clientFindDuplicates(title, desc, complaints) {
+      const tokens = (title + ' ' + desc).toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(w => w.length > 3);
+      let bestMatch = null;
+      let maxPct = 0;
+
+      for (const c of complaints) {
+        const cTokens = (c.title + ' ' + c.description).toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(w => w.length > 3);
+        const intersect = tokens.filter(t => cTokens.includes(t));
+        const sim = Math.min(100, Math.round((intersect.length * 2 / (tokens.length + cTokens.length)) * 100));
+        if (sim > maxPct) {
+          maxPct = sim;
+          bestMatch = c;
+        }
+      }
+
+      const isDup = maxPct >= 75;
+      return {
+        is_duplicate: isDup ? 1 : 0,
+        similarity_percentage: maxPct,
+        similar_complaint_id: isDup && bestMatch ? bestMatch.complaint_id : null,
+        existing_complaint_description: isDup && bestMatch ? bestMatch.description : null,
+        matches: maxPct >= 40 && bestMatch ? [{
+          complaint_id: bestMatch.complaint_id,
+          title: bestMatch.title,
+          location: bestMatch.location,
+          status: bestMatch.status,
+          similarity_percentage: maxPct
+        }] : []
+      };
+    }
+
+    // Client-side Mock Router that handles all REST APIs
+    async function mockCivicApi(urlStr, options = {}) {
+      const method = (options.method || 'GET').toUpperCase();
+      const complaints = getStoredComplaints();
+      const parsedUrl = new URL(urlStr, window.location.href);
+      const path = parsedUrl.pathname.replace(/^.*?\/api/, '/api');
+      const params = parsedUrl.searchParams;
+
+      // Helper to generate a Response object
+      const jsonResponse = (data, status = 200) => {
+        return new Response(JSON.stringify(data), {
+          status,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      };
+
+      // 1. /api/auth/me
+      if (path === '/api/auth/me') {
+        const tok = localStorage.getItem('civic_token');
+        if (tok && tok.includes(':')) {
+          const parts = tok.split(':');
+          return jsonResponse({ user: { id: parseInt(parts[0]) || 1, role: parts[1], email: parts[2], name: parts[2].split('@')[0] } });
+        }
+        return jsonResponse({ user: { id: 3, role: 'staff', email: 'staff@civic.gov', name: 'Officer David Vance' } });
+      }
+
+      // 2. /api/auth/login
+      if (path === '/api/auth/login') {
+        const body = options.body ? (typeof options.body === 'string' ? JSON.parse(options.body) : options.body) : {};
+        const email = body.email || 'staff@civic.gov';
+        const role = email.includes('staff') || email.includes('inspector') ? 'staff' : 'citizen';
+        const name = email === 'staff@civic.gov' ? 'Officer David Vance' : (email === 'citizen@example.com' ? 'Rajesh Kumar' : email.split('@')[0]);
+        const user = { id: 1, email, name, role, phone: '+1 (555) 019-2831' };
+        const token = `1:${role}:${email}`;
+        return jsonResponse({ token, user, message: 'Login successful' });
+      }
+
+      // 3. /api/auth/register
+      if (path === '/api/auth/register') {
+        const body = options.body ? JSON.parse(options.body) : {};
+        const user = { id: Date.now(), email: body.email || 'new@example.com', name: body.name || 'Citizen', role: 'citizen', phone: body.phone || '' };
+        return jsonResponse({ token: `1:citizen:${user.email}`, user, message: 'Registration successful' }, 201);
+      }
+
+      // 4. /api/analytics/summary
+      if (path === '/api/analytics/summary') {
+        const total = complaints.length;
+        const pending = complaints.filter(c => c.status === 'Pending').length;
+        const verified = complaints.filter(c => c.status === 'Verified').length;
+        const in_progress = complaints.filter(c => c.status === 'In Progress').length;
+        const resolved = complaints.filter(c => c.status === 'Resolved').length;
+        const rejected = complaints.filter(c => c.status === 'Rejected').length;
+        const critical = complaints.filter(c => c.priority === 'Critical').length;
+        const high = complaints.filter(c => c.priority === 'High').length;
+        const duplicates = complaints.filter(c => c.is_duplicate).length;
+        const avg_priority = Math.round(complaints.reduce((a, b) => a + (b.priority_score || 50), 0) / (total || 1) * 10) / 10;
+        return jsonResponse({
+          total, pending, verified, in_progress, resolved, rejected,
+          critical, high, critical_and_high: critical + high,
+          duplicates_flagged: duplicates,
+          resolution_rate: total > 0 ? Math.round((resolved / total) * 1000) / 10 : 0.0,
+          avg_priority_score: avg_priority
+        });
+      }
+
+      // 5. /api/analytics/charts
+      if (path === '/api/analytics/charts') {
+        const catCounts = CATEGORIES.map(cat => complaints.filter(c => c.category === cat).length);
+        const prioCounts = ['Critical', 'High', 'Medium', 'Low'].map(p => complaints.filter(c => c.priority === p).length);
+        const statusCounts = ['Pending', 'Verified', 'In Progress', 'Resolved', 'Rejected'].map(s => complaints.filter(c => c.status === s).length);
+        return jsonResponse({
+          categories: { labels: CATEGORIES, data: catCounts },
+          category_distribution: { labels: CATEGORIES, data: catCounts },
+          priorities: { labels: ['Critical', 'High', 'Medium', 'Low'], data: prioCounts },
+          priority_distribution: { labels: ['Critical', 'High', 'Medium', 'Low'], data: prioCounts },
+          statuses: { labels: ['Pending', 'Verified', 'In Progress', 'Resolved', 'Rejected'], data: statusCounts },
+          status_distribution: { labels: ['Pending', 'Verified', 'In Progress', 'Resolved', 'Rejected'], data: statusCounts },
+          monthly: { labels: ['2026-10', '2026-11'], submitted: [6, complaints.length - 6], resolved: [3, complaints.filter(c => c.status === 'Resolved').length - 3] },
+          monthly_trends: { labels: ['2026-10', '2026-11'], submitted: [6, complaints.length - 6], resolved: [3, complaints.filter(c => c.status === 'Resolved').length - 3] }
+        });
+      }
+
+      // 6. /api/analytics (combined)
+      if (path === '/api/analytics') {
+        const sumResp = await (await mockCivicApi('/api/analytics/summary')).json();
+        const chartResp = await (await mockCivicApi('/api/analytics/charts')).json();
+        return jsonResponse({ summary: sumResp, charts: chartResp });
+      }
+
+      // 7. /api/complaints/preview
+      if (path === '/api/complaints/preview') {
+        const body = options.body ? JSON.parse(options.body) : {};
+        const catRes = clientPredictCategory(body.description || body.title || '');
+        const prioRes = clientCalculatePriority(body.title, body.description, body.location);
+        const dupRes = clientFindDuplicates(body.title || '', body.description || '', complaints);
+        return jsonResponse({
+          predicted_category: catRes.predicted_category,
+          category_confidence: catRes.confidence,
+          priority_assessment: {
+            priority: prioRes.priority,
+            score: prioRes.score,
+            explanation: prioRes.explanation,
+            sub_scores: prioRes.sub_scores
+          },
+          duplicate_analysis: dupRes
+        });
+      }
+
+      // 8. /api/complaints/track/:id
+      if (path.startsWith('/api/complaints/track/')) {
+        const id = decodeURIComponent(path.replace('/api/complaints/track/', '').trim());
+        const comp = complaints.find(c => String(c.complaint_id).toLowerCase() === id.toLowerCase() || String(c.id) === id);
+        if (comp) return jsonResponse({ complaint: comp });
+        return jsonResponse({ error: `Complaint '${id}' not found` }, 404);
+      }
+
+      // 9. /api/complaints or /api/staff/complaints (GET)
+      if (path === '/api/complaints' || path === '/api/staff/complaints') {
+        let filtered = [...complaints];
+        const search = (params.get('search') || '').toLowerCase();
+        const category = params.get('category');
+        const priority = params.get('priority');
+        const status = params.get('status');
+        const duplicate = params.get('duplicate');
+
+        if (search) {
+          filtered = filtered.filter(c => (c.title + ' ' + c.description + ' ' + c.complaint_id + ' ' + c.location).toLowerCase().includes(search));
+        }
+        if (category) filtered = filtered.filter(c => c.category === category);
+        if (priority) filtered = filtered.filter(c => c.priority === priority);
+        if (status) filtered = filtered.filter(c => c.status === status);
+        if (duplicate === '1') filtered = filtered.filter(c => c.is_duplicate);
+        if (duplicate === '0') filtered = filtered.filter(c => !c.is_duplicate);
+
+        return jsonResponse({ complaints: filtered, total: filtered.length });
+      }
+
+      // 10. Single complaint details: /api/complaints/:id or /api/staff/complaints/:id (GET)
+      const detailMatch = path.match(/\/api\/(?:staff\/)?complaints\/([^\/]+)$/);
+      if (detailMatch && method === 'GET') {
+        const id = decodeURIComponent(detailMatch[1]);
+        const comp = complaints.find(c => String(c.complaint_id).toLowerCase() === id.toLowerCase() || String(c.id) === id);
+        if (comp) {
+          const dupAnalysis = clientFindDuplicates(comp.title, comp.description, complaints.filter(c => c.complaint_id !== comp.complaint_id));
+          return jsonResponse({ complaint: { ...comp, duplicate_analysis: dupAnalysis } });
+        }
+        return jsonResponse({ error: `Complaint #${id} not found` }, 404);
+      }
+
+      // 11. Verify complaint: /api/complaints/:id/verify
+      if (path.includes('/verify') && (method === 'PUT' || method === 'PATCH' || method === 'POST')) {
+        const idMatch = path.match(/\/api\/(?:staff\/)?complaints\/([^\/]+)\/verify/);
+        const id = idMatch ? idMatch[1] : '';
+        const idx = complaints.findIndex(c => String(c.complaint_id).toLowerCase() === id.toLowerCase() || String(c.id) === id);
+        if (idx !== -1) {
+          const body = options.body ? JSON.parse(options.body) : {};
+          complaints[idx].status = 'Verified';
+          complaints[idx].history.push({
+            id: Date.now(),
+            complaint_id: complaints[idx].complaint_id,
+            previous_status: 'Pending',
+            new_status: 'Verified',
+            changed_by: 'Officer David Vance',
+            notes: body.notes || 'Verified by municipal officer.',
+            created_at: new Date().toISOString().replace('T', ' ').substring(0, 19)
+          });
+          saveStoredComplaints(complaints);
+          return jsonResponse({ message: `Complaint ${complaints[idx].complaint_id} verified successfully.`, status: 'Verified' });
+        }
+        return jsonResponse({ error: 'Complaint not found' }, 404);
+      }
+
+      // 12. Update Status: /api/complaints/:id/status
+      if (path.includes('/status') && (method === 'PUT' || method === 'PATCH' || method === 'POST')) {
+        const idMatch = path.match(/\/api\/(?:staff\/)?complaints\/([^\/]+)\/status/);
+        const id = idMatch ? idMatch[1] : '';
+        const idx = complaints.findIndex(c => String(c.complaint_id).toLowerCase() === id.toLowerCase() || String(c.id) === id);
+        if (idx !== -1) {
+          const body = options.body ? JSON.parse(options.body) : {};
+          const prev = complaints[idx].status;
+          complaints[idx].status = body.status || 'Verified';
+          complaints[idx].history.push({
+            id: Date.now(),
+            complaint_id: complaints[idx].complaint_id,
+            previous_status: prev,
+            new_status: complaints[idx].status,
+            changed_by: body.changed_by || 'Officer David Vance',
+            notes: body.notes || 'Status updated.',
+            created_at: new Date().toISOString().replace('T', ' ').substring(0, 19)
+          });
+          saveStoredComplaints(complaints);
+          return jsonResponse({ message: `Status updated to ${complaints[idx].status}.`, status: complaints[idx].status });
+        }
+        return jsonResponse({ error: 'Complaint not found' }, 404);
+      }
+
+      // 13. Duplicate toggle
+      if (path.includes('/duplicate') && (method === 'PATCH' || method === 'PUT')) {
+        const idMatch = path.match(/\/api\/(?:staff\/)?complaints\/([^\/]+)\/duplicate/);
+        const id = idMatch ? idMatch[1] : '';
+        const idx = complaints.findIndex(c => String(c.complaint_id).toLowerCase() === id.toLowerCase() || String(c.id) === id);
+        if (idx !== -1) {
+          const body = options.body ? JSON.parse(options.body) : {};
+          complaints[idx].is_duplicate = body.is_duplicate !== undefined ? body.is_duplicate : 1;
+          complaints[idx].duplicate_of_id = body.duplicate_of_id || null;
+          complaints[idx].duplicate_similarity = body.duplicate_similarity || 85.0;
+          saveStoredComplaints(complaints);
+          return jsonResponse({ message: 'Duplicate flag updated successfully.' });
+        }
+        return jsonResponse({ error: 'Complaint not found' }, 404);
+      }
+
+      // 14. Recalculate priorities
+      if (path.includes('/recalculate-priorities')) {
+        complaints.forEach(c => {
+          if (c.status !== 'Resolved' && c.status !== 'Rejected') {
+            const p = clientCalculatePriority(c.title, c.description, c.location);
+            c.priority = p.priority;
+            c.priority_level = p.priority;
+            c.priority_score = p.score;
+            c.priority_reason = p.explanation;
+          }
+        });
+        saveStoredComplaints(complaints);
+        return jsonResponse({ message: `Recalculated priority scores for ${complaints.length} active complaints.` });
+      }
+
+      // 15. Submit Complaint: /api/complaints (POST)
+      if (path === '/api/complaints' && method === 'POST') {
+        let body = {};
+        if (options.body instanceof FormData) {
+          for (const [k, v] of options.body.entries()) {
+            if (typeof v === 'string') body[k] = v;
+          }
+        } else if (options.body) {
+          body = typeof options.body === 'string' ? JSON.parse(options.body) : options.body;
+        }
+
+        const newIdNum = 1000 + complaints.length + 1;
+        const complaintId = `CIVIC-2026-${newIdNum}`;
+        const catRes = clientPredictCategory(body.description || body.title || '');
+        const prioRes = clientCalculatePriority(body.title, body.description, body.location);
+        const dupRes = clientFindDuplicates(body.title || '', body.description || '', complaints);
+        const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+        const newComp = {
+          id: complaints.length + 1,
+          complaint_id: complaintId,
+          title: body.title || 'Untitled Grievance',
+          description: body.description || '',
+          category: body.category && body.category !== 'Auto-Detect with AI' ? body.category : catRes.predicted_category,
+          predicted_category: catRes.predicted_category,
+          category_confidence: catRes.confidence,
+          location: body.location || 'Municipal Sector',
+          landmark: body.landmark || '',
+          image_url: body.image_url || 'https://images.unsplash.com/photo-1541888946425-d0fbb18615f3?w=600&auto=format&fit=crop&q=80',
+          status: 'Pending',
+          priority: prioRes.priority,
+          priority_level: prioRes.priority,
+          priority_score: prioRes.score,
+          priority_reason: prioRes.explanation,
+          sub_scores: prioRes.sub_scores,
+          is_duplicate: dupRes.is_duplicate,
+          duplicate_of_id: dupRes.similar_complaint_id,
+          duplicate_similarity: dupRes.similarity_percentage,
+          citizen_name: body.citizen_name || 'Citizen Portal',
+          citizen_email: body.citizen_email || 'citizen@example.com',
+          created_at: nowStr,
+          updated_at: nowStr,
+          history: [{
+            id: Date.now(),
+            complaint_id: complaintId,
+            previous_status: null,
+            new_status: 'Pending',
+            changed_by: 'Citizen Portal',
+            notes: `Complaint registered. AI Priority: ${prioRes.priority} (${prioRes.score} pts). AI Confidence: ${catRes.confidence}%.`,
+            created_at: nowStr
+          }]
+        };
+
+        complaints.unshift(newComp);
+        saveStoredComplaints(complaints);
+        return jsonResponse({ message: 'Complaint submitted successfully.', complaint: newComp, ...newComp }, 201);
+      }
+
+      return jsonResponse({ message: 'OK', status: 200 });
+    }
+
+    // Global Fetch Interceptor
+    const originalFetch = window.fetch;
+    window.fetch = async function(url, options = {}) {
+      const urlStr = typeof url === 'string' ? url : (url && url.url ? url.url : '');
+      const isLocalFlask = window.location.port === '5000';
+      const hasRemoteBackend = !!configuredBackend;
+
+      // On localhost:5000 or when user specified an external backend URL, attempt real fetch
+      if (!isGitHubPages || isLocalFlask || hasRemoteBackend) {
+        try {
+          let reqUrl = urlStr;
+          if (configuredBackend && urlStr.startsWith('/api')) {
+            reqUrl = configuredBackend.replace(/\/$/, '') + urlStr;
+          }
+          const resp = await originalFetch(reqUrl, options);
+          const ct = resp.headers.get('content-type') || '';
+          if (resp.ok || ct.includes('application/json')) {
+            return resp;
+          }
+        } catch (netErr) {
+          if (!isGitHubPages && !hasRemoteBackend) throw netErr;
+          console.warn('[CivicEngine] Backend fetch error, switching to in-browser engine:', netErr);
+        }
+      }
+
+      // In-browser mock handler for static GitHub Pages or offline fallback
+      if (urlStr.includes('/api/') || urlStr.startsWith('/api') || urlStr.includes('api/')) {
+        return mockCivicApi(urlStr, options);
+      }
+
+      return originalFetch(url, options);
+    };
+
+
+    const CATEGORIES = [
+      'Road Damage',
+      'Garbage Accumulation',
+      'Water Leakage',
+      'Blocked Drainage',
+      'Broken Streetlights'
+    ];
+
+    // ==========================================
+    // LUCIDE SVG ICONS COMPONENT
+    // ==========================================
+    function LucideIcon({ name, className = "w-5 h-5", ...props }) {
+      const icons = {
+        server: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+            <line x1="6" y1="6" x2="6.01" y2="6"></line>
+            <line x1="6" y1="18" x2="6.01" y2="18"></line>
+          </svg>
+        ),
+      const icons = {
+        home: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+          </svg>
+        ),
+        filePlus: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        ),
+        search: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        ),
+        dashboard: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+          </svg>
+        ),
+        barChart: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          </svg>
+        ),
+        shield: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+          </svg>
+        ),
+        user: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+          </svg>
+        ),
+        logIn: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+          </svg>
+        ),
+        logOut: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
+        ),
+        alertTriangle: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        ),
+        checkCircle: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        ),
+        xCircle: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        ),
+        clock: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        ),
+        refresh: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        ),
+        copy: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+        ),
+        arrowLeft: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+          </svg>
+        ),
+        building: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+          </svg>
+        ),
+        camera: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        ),
+        menu: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        ),
+        x: (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        )
+      };
+
+      return icons[name] || icons.home;
+    }
+
+    // Helper Badges
+    function getPriorityBadge(priority) {
+      switch (priority) {
+        case 'Critical':
+          return 'bg-red-100 text-red-800 border-red-200 ring-1 ring-red-300';
+        case 'High':
+          return 'bg-orange-100 text-orange-800 border-orange-200 ring-1 ring-orange-300';
+        case 'Medium':
+          return 'bg-amber-100 text-amber-800 border-amber-200 ring-1 ring-amber-300';
+        case 'Low':
+        default:
+          return 'bg-blue-50 text-blue-700 border-blue-200';
+      }
+    }
+
+    function getStatusBadge(status) {
+      switch (status) {
+        case 'Pending':
+          return 'bg-amber-50 text-amber-700 border-amber-200';
+        case 'Verified':
+          return 'bg-blue-50 text-blue-700 border-blue-200';
+        case 'In Progress':
+          return 'bg-purple-50 text-purple-700 border-purple-200';
+        case 'Resolved':
+          return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+        case 'Rejected':
+          return 'bg-rose-50 text-rose-700 border-rose-200';
+        default:
+          return 'bg-slate-50 text-slate-700 border-slate-200';
+      }
+    }
+
+    function getCategoryIcon(cat) {
+      switch (cat) {
+        case 'Road Damage': return '🚧';
+        case 'Garbage Accumulation': return '🗑️';
+        case 'Water Leakage': return '💧';
+        case 'Blocked Drainage': return '🌊';
+        case 'Broken Streetlights': return '💡';
+        default: return '📋';
+      }
+    }
+
+    // ==========================================
+    // MAIN APP WITH PROFESSIONAL SIDEBAR & ROUTER
+    // ==========================================
+    function App() {
+      // Routing state: 'home', 'submit', 'track', 'login', 'dashboard', 'details', 'analytics'
+      const [currentPage, setCurrentPage] = useState('home');
+      const [currentParam, setCurrentParam] = useState(''); // e.g. complaint ID for track or details
+      const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+      const [backendModalOpen, setBackendModalOpen] = useState(false);
+      const [customApiUrl, setCustomApiUrl] = useState(localStorage.getItem('CIVIC_BACKEND_URL') || '');
+
+      const [currentUser, setCurrentUser] = useState(null);
+      const [token, setToken] = useState(localStorage.getItem('civic_token') || '');
+      const [toast, setToast] = useState(null);
+
+      const showToast = (message, type = 'info') => {
+        setToast({ message, type });
+        setTimeout(() => setToast(null), 4500);
+      };
+
+      // Hash-based navigation synchronization
+      useEffect(() => {
+        const handleHashChange = () => {
+          const hash = window.location.hash.replace('#/', '').replace('#', '');
+          const parts = hash.split('/');
+          const page = parts[0] || 'home';
+          const param = parts[1] || '';
+          
+          if (['home', 'submit', 'track', 'login', 'dashboard', 'details', 'analytics'].includes(page)) {
+            setCurrentPage(page);
+            setCurrentParam(param);
+          } else {
+            setCurrentPage('home');
+          }
+        };
+
+        handleHashChange();
+        window.addEventListener('hashchange', handleHashChange);
+        return () => window.removeEventListener('hashchange', handleHashChange);
+      }, []);
+
+      const navigate = (page, param = '') => {
+        if (param) {
+          window.location.hash = `#/${page}/${param}`;
+        } else {
+          window.location.hash = `#/${page}`;
+        }
+        setMobileSidebarOpen(false);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      };
+
+      // Verify token & user
+      useEffect(() => {
+        if (token) {
+          fetch(`${API_BASE}/auth/me`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          })
+          .then(res => res.ok ? safeJson(res) : null)
+          .then(data => {
+            if (data && data.user) {
+              setCurrentUser(data.user);
+            } else {
+              localStorage.removeItem('civic_token');
+              setToken('');
+              setCurrentUser(null);
+            }
+          })
+          .catch(() => {});
+        }
+      }, [token]);
+
+      const handleLoginSuccess = (user, authToken) => {
+        setCurrentUser(user);
+        setToken(authToken);
+        localStorage.setItem('civic_token', authToken);
+        showToast(`Welcome back, ${user.name}!`, 'success');
+        if (user.role === 'staff') {
+          navigate('dashboard');
+        } else {
+          navigate('submit');
+        }
+      };
+
+      const handleLogout = () => {
+        setCurrentUser(null);
+        setToken('');
+        localStorage.removeItem('civic_token');
+        showToast('Logged out successfully.', 'info');
+        navigate('home');
+      };
+
+      return (
+        <div className="min-h-screen flex bg-slate-50">
+          {/* BACKEND CONNECTION MODAL */}
+          {backendModalOpen && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-scale-in">
+                <div className="flex justify-between items-center mb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+                      <LucideIcon name="server" className="w-4 h-4" />
+                    </div>
+                    <h3 className="font-bold text-base text-slate-900">Backend Server Connection</h3>
+                  </div>
+                  <button onClick={() => setBackendModalOpen(false)} className="text-slate-400 hover:text-slate-600 text-lg">✕</button>
+                </div>
+
+                <p className="text-xs text-slate-500 mb-4 leading-relaxed">
+                  {isGitHubPages
+                    ? "Your portal is hosted on GitHub Pages. It currently runs via the built-in Intelligent Civic Engine with complete local persistence. If you have deployed the Flask backend (on Render, Railway, etc.), you can connect it here."
+                    : "Connected directly to the local Python Flask backend on http://127.0.0.1:5000."}
+                </p>
+
+                <div className="space-y-2 mb-5">
+                  <label className="block text-xs font-bold text-slate-700">Remote Flask API URL</label>
+                  <input
+                    type="url"
+                    placeholder="e.g. https://civic-complaint-system.onrender.com"
+                    value={customApiUrl}
+                    onChange={(e) => setCustomApiUrl(e.target.value)}
+                    className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-xs bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                  />
+                  <p className="text-[11px] text-slate-400">
+                    Leave blank to use the autonomous in-browser engine on GitHub Pages.
+                  </p>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      if (customApiUrl.trim()) {
+                        localStorage.setItem('CIVIC_BACKEND_URL', customApiUrl.trim());
+                      } else {
+                        localStorage.removeItem('CIVIC_BACKEND_URL');
+                      }
+                      setBackendModalOpen(false);
+                      window.location.reload();
+                    }}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-xs shadow-sm transition-all"
+                  >
+                    Save & Reconnect
+                  </button>
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem('CIVIC_BACKEND_URL');
+                      setCustomApiUrl('');
+                      setBackendModalOpen(false);
+                      window.location.reload();
+                    }}
+                    className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-all"
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TOAST ALERTS */}
+          {toast && (
+            <div className={`fixed bottom-5 right-5 z-50 flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-2xl border text-xs sm:text-sm font-semibold transition-all transform animate-bounce ${
+              toast.type === 'success' ? 'bg-emerald-600 text-white border-emerald-500' :
+              toast.type === 'error' ? 'bg-rose-600 text-white border-rose-500' :
+              toast.type === 'warning' ? 'bg-amber-500 text-white border-amber-400' :
+              'bg-slate-900 text-white border-slate-700'
+            }`}>
+              <span>{toast.message}</span>
+              <button onClick={() => setToast(null)} className="ml-2 hover:opacity-75">✕</button>
+            </div>
+          )}
+
+          {/* DESKTOP SIDEBAR */}
+          <aside className="hidden lg:flex flex-col w-72 bg-govnavy text-white flex-shrink-0 border-r border-civic-900 select-none sticky top-0 h-screen z-30">
+            {/* Sidebar Branding */}
+            <div className="p-6 border-b border-civic-900/80 flex items-center gap-3.5 cursor-pointer" onClick={() => navigate('home')}>
+              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-500 to-civic-700 flex items-center justify-center text-white shadow-lg border border-blue-400/30">
+                <LucideIcon name="building" className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <h1 className="font-bold text-base tracking-tight text-white">CivicResolve AI</h1>
+                  <span className="bg-blue-500/20 text-blue-300 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">Gov 2.0</span>
+                </div>
+                <p className="text-[11px] text-slate-300 font-medium">Smart Prioritization Portal</p>
+              </div>
+            </div>
+
+            {/* Navigation Links */}
+            <nav className="flex-1 p-4 space-y-6 overflow-y-auto">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-3 mb-2">
+                  Public Citizen Services
+                </div>
+                <div className="space-y-1">
+                  <button
+                    onClick={() => navigate('home')}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                      currentPage === 'home' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-300 hover:text-white hover:bg-civic-900'
+                    }`}
+                  >
+                    <LucideIcon name="home" className="w-4 h-4" />
+                    <span>Home Overview</span>
+                  </button>
+
+                  <button
+                    onClick={() => navigate('submit')}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                      currentPage === 'submit' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-300 hover:text-white hover:bg-civic-900'
+                    }`}
+                  >
+                    <LucideIcon name="filePlus" className="w-4 h-4" />
+                    <span>Submit Complaint</span>
+                  </button>
+
+                  <button
+                    onClick={() => navigate('track')}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                      currentPage === 'track' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-300 hover:text-white hover:bg-civic-900'
+                    }`}
+                  >
+                    <LucideIcon name="search" className="w-4 h-4" />
+                    <span>Track Complaint Status</span>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-3 mb-2">
+                  Staff & Administration
+                </div>
+                <div className="space-y-1">
+                  <button
+                    onClick={() => navigate('dashboard')}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                      currentPage === 'dashboard' || currentPage === 'details' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-300 hover:text-white hover:bg-civic-900'
+                    }`}
+                  >
+                    <LucideIcon name="dashboard" className="w-4 h-4" />
+                    <span>Staff Dashboard</span>
+                  </button>
+
+                  <button
+                    onClick={() => navigate('analytics')}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                      currentPage === 'analytics' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-300 hover:text-white hover:bg-civic-900'
+                    }`}
+                  >
+                    <LucideIcon name="barChart" className="w-4 h-4" />
+                    <span>Analytics & Charts</span>
+                  </button>
+                </div>
+              </div>
+            </nav>
+
+            {/* Sidebar Bottom Profile / Login */}
+            <div className="p-4 border-t border-civic-900/80 bg-civic-950/40">
+              {currentUser ? (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5 overflow-hidden">
+                    <div className="w-8 h-8 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-xs flex-shrink-0">
+                      {currentUser.name.charAt(0)}
+                    </div>
+                    <div className="overflow-hidden text-left">
+                      <div className="text-xs font-bold text-white truncate">{currentUser.name}</div>
+                      <div className="text-[10px] text-blue-300 capitalize">{currentUser.role} Account</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    title="Log Out"
+                    className="text-slate-400 hover:text-rose-400 p-1.5 transition-colors"
+                  >
+                    <LucideIcon name="logOut" className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => navigate('login')}
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold py-2 px-3 rounded-xl transition-all shadow-md flex items-center justify-center gap-2"
+                >
+                  <LucideIcon name="logIn" className="w-4 h-4" />
+                  <span>Official / Citizen Login</span>
+                </button>
+              )}
+            </div>
+          </aside>
+
+          {/* MOBILE SIDEBAR OVERLAY */}
+          {mobileSidebarOpen && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm lg:hidden flex">
+              <div className="w-72 bg-govnavy text-white flex flex-col h-full shadow-2xl">
+                <div className="p-5 border-b border-civic-900 flex justify-between items-center">
+                  <div className="flex items-center gap-2.5">
+                    <LucideIcon name="building" className="w-6 h-6 text-blue-400" />
+                    <span className="font-bold text-white text-base">CivicResolve AI</span>
+                  </div>
+                  <button onClick={() => setMobileSidebarOpen(false)} className="text-slate-400 hover:text-white p-1">
+                    <LucideIcon name="x" className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="p-4 space-y-4 flex-1 overflow-y-auto">
+                  <button onClick={() => navigate('home')} className="w-full text-left py-2.5 px-3 rounded-lg text-sm font-semibold hover:bg-civic-900 flex items-center gap-3">
+                    <LucideIcon name="home" className="w-4 h-4" /> Home
+                  </button>
+                  <button onClick={() => navigate('submit')} className="w-full text-left py-2.5 px-3 rounded-lg text-sm font-semibold hover:bg-civic-900 flex items-center gap-3">
+                    <LucideIcon name="filePlus" className="w-4 h-4" /> Submit Complaint
+                  </button>
+                  <button onClick={() => navigate('track')} className="w-full text-left py-2.5 px-3 rounded-lg text-sm font-semibold hover:bg-civic-900 flex items-center gap-3">
+                    <LucideIcon name="search" className="w-4 h-4" /> Track Complaint
+                  </button>
+                  <button onClick={() => navigate('dashboard')} className="w-full text-left py-2.5 px-3 rounded-lg text-sm font-semibold hover:bg-civic-900 flex items-center gap-3">
+                    <LucideIcon name="dashboard" className="w-4 h-4" /> Staff Dashboard
+                  </button>
+                  <button onClick={() => navigate('analytics')} className="w-full text-left py-2.5 px-3 rounded-lg text-sm font-semibold hover:bg-civic-900 flex items-center gap-3">
+                    <LucideIcon name="barChart" className="w-4 h-4" /> Analytics
+                  </button>
+                </div>
+
+                <div className="p-4 border-t border-civic-900">
+                  {currentUser ? (
+                    <button onClick={handleLogout} className="w-full py-2 bg-red-600/80 text-white rounded-lg text-xs font-semibold">
+                      Sign Out ({currentUser.name})
+                    </button>
+                  ) : (
+                    <button onClick={() => navigate('login')} className="w-full py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold">
+                      Sign In
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="flex-1" onClick={() => setMobileSidebarOpen(false)}></div>
+            </div>
+          )}
+
+          {/* MAIN PAGE CONTAINER */}
+          <div className="flex-1 flex flex-col min-w-0">
+            {/* Top Navigation Bar on Mobile & Desktop Subheader */}
+            <header className="bg-white border-b border-slate-200 sticky top-0 z-20 px-4 sm:px-8 py-3.5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setMobileSidebarOpen(true)}
+                  className="lg:hidden text-slate-600 hover:text-slate-900 p-1.5 rounded-lg border border-slate-200"
+                >
+                  <LucideIcon name="menu" className="w-5 h-5" />
+                </button>
+                <div>
+                  <h2 className="text-base sm:text-lg font-bold text-slate-900 capitalize tracking-tight leading-tight">
+                    {currentPage === 'home' && 'Municipal Grievance Redressal Portal'}
+                    {currentPage === 'submit' && 'Register Citizen Grievance'}
+                    {currentPage === 'track' && 'Public Complaint Tracking'}
+                    {currentPage === 'login' && 'Staff & Citizen Authentication'}
+                    {currentPage === 'dashboard' && 'Municipal Staff Command Center'}
+                    {currentPage === 'details' && `Complaint Dossier #${currentParam}`}
+                    {currentPage === 'analytics' && 'Civic Intelligence & Analytics'}
+                  </h2>
+                  <p className="text-[11px] text-slate-500 hidden sm:block">
+                    Municipal Corporation • Powered by Scikit-Learn NLP & Priority Automation
+                  </p>
+                </div>
+              </div>
+
+              {/* Top Quick Actions */}
+              <div className="flex items-center gap-2.5">
+                {currentPage !== 'submit' && (
+                  <button
+                    onClick={() => navigate('submit')}
+                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl transition-all shadow-xs flex items-center gap-1.5"
+                  >
+                    <LucideIcon name="filePlus" className="w-3.5 h-3.5" />
+                    <span>Report Issue</span>
+                  </button>
+                )}
+
+                {/* Backend Connection Indicator & Modal Trigger */}
+                <button
+                  type="button"
+                  onClick={() => setBackendModalOpen(true)}
+                  title="Configure backend server connection"
+                  className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all hover:bg-slate-100 bg-slate-50 text-slate-700 border-slate-200"
+                >
+                  <span className={`w-2 h-2 rounded-full ${isGitHubPages && !customApiUrl ? 'bg-blue-500' : 'bg-emerald-500 animate-pulse'}`}></span>
+                  <span>{isGitHubPages && !customApiUrl ? 'GitHub Pages Live' : (customApiUrl ? 'Connected API' : 'Flask Local')}</span>
+                </button>
+
+                {currentUser ? (
+                  <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 px-3 py-1 rounded-xl text-xs">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    <span className="font-semibold text-slate-700">{currentUser.name}</span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => navigate('login')}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold px-3 py-1.5 sm:py-2 rounded-xl transition-all border border-slate-200"
+                  >
+                    Sign In
+                  </button>
+                )}
+              </div>
+            </header>
+
+            {/* ROUTED CONTENT VIEWS */}
+            <main className="flex-1 p-4 sm:p-8 max-w-7xl w-full mx-auto">
+              {currentPage === 'home' && (
+                <HomePage navigate={navigate} showToast={showToast} />
+              )}
+
+              {currentPage === 'submit' && (
+                <ComplaintFormPage navigate={navigate} currentUser={currentUser} showToast={showToast} />
+              )}
+
+              {currentPage === 'track' && (
+                <ComplaintTrackingPage initialId={currentParam} navigate={navigate} showToast={showToast} />
+              )}
+
+              {currentPage === 'login' && (
+                <StaffLoginPage onLoginSuccess={handleLoginSuccess} navigate={navigate} showToast={showToast} />
+              )}
+
+              {currentPage === 'dashboard' && (
+                <StaffDashboardPage
+                  currentUser={currentUser}
+                  token={token}
+                  navigate={navigate}
+                  showToast={showToast}
+                />
+              )}
+
+              {currentPage === 'details' && (
+                <ComplaintDetailsPage
+                  complaintId={currentParam}
+                  currentUser={currentUser}
+                  token={token}
+                  navigate={navigate}
+                  showToast={showToast}
+                />
+              )}
+
+              {currentPage === 'analytics' && (
+                <AnalyticsPage showToast={showToast} />
+              )}
+            </main>
+
+            {/* FOOTER */}
+            <footer className="bg-white border-t border-slate-200 py-6 px-4 sm:px-8 mt-auto text-xs text-slate-500 sm:flex sm:justify-between sm:items-center">
+              <div className="flex items-center gap-2 mb-2 sm:mb-0">
+                <span className="font-bold text-slate-700">CivicResolve AI</span>
+                <span>•</span>
+                <span>Municipal Grievance Redressal Division</span>
+              </div>
+              <div className="flex items-center gap-4 text-slate-400">
+                <span>TF-IDF Text Categorization</span>
+                <span>•</span>
+                <span>Cosine Similarity Duplicates</span>
+                <span>•</span>
+                <span>Priority Engine</span>
+              </div>
+            </footer>
+          </div>
+        </div>
+      );
+    }
+
+    // ==========================================
+    // 1. HOME PAGE COMPONENT
+    // ==========================================
+    function HomePage({ navigate, showToast }) {
+      const [stats, setStats] = useState(null);
+      const [loading, setLoading] = useState(true);
+
+      useEffect(() => {
+        fetch(`${API_BASE}/analytics/summary`)
+          .then(res => safeJson(res))
+          .then(data => setStats(data))
+          .catch(() => {})
+          .finally(() => setLoading(false));
+      }, []);
+
+      return (
+        <div className="space-y-10 animate-fade-in">
+          {/* HERO BANNER */}
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-govnavy via-civic-900 to-civic-800 text-white p-8 sm:p-12 shadow-xl border border-civic-900">
+            <div className="relative z-10 max-w-3xl space-y-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 border border-blue-400/30 text-blue-300 text-xs font-bold tracking-wide uppercase">
+                <span>🏛️</span> Official Municipal Grievance Platform
+              </div>
+              <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white leading-tight">
+                Intelligent Civic Complaint Prioritization System
+              </h1>
+              <p className="text-sm sm:text-base text-slate-300 leading-relaxed max-w-2xl">
+                An AI-driven civic infrastructure platform that automatically classifies public issues, detects duplicate neighborhood reports via NLP cosine similarity, and prioritizes critical safety hazards for expedited field dispatch.
+              </p>
+
+              {/* THREE MAIN BUTTONS */}
+              <div className="pt-4 flex flex-wrap gap-3.5">
+                <button
+                  onClick={() => navigate('submit')}
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 py-3.5 rounded-xl shadow-lg hover:shadow-blue-600/30 transition-all text-sm flex items-center gap-2"
+                >
+                  <LucideIcon name="filePlus" className="w-4 h-4" />
+                  <span>Submit a Complaint</span>
+                </button>
+
+                <button
+                  onClick={() => navigate('track')}
+                  className="bg-white/10 hover:bg-white/20 text-white font-bold px-6 py-3.5 rounded-xl border border-white/20 backdrop-blur-sm transition-all text-sm flex items-center gap-2"
+                >
+                  <LucideIcon name="search" className="w-4 h-4" />
+                  <span>Track Complaint</span>
+                </button>
+
+                <button
+                  onClick={() => navigate('login')}
+                  className="bg-slate-900 hover:bg-black text-slate-200 font-bold px-6 py-3.5 rounded-xl border border-slate-700 transition-all text-sm flex items-center gap-2"
+                >
+                  <LucideIcon name="shield" className="w-4 h-4" />
+                  <span>Staff Portal Login</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Background Decorative Rings */}
+            <div className="absolute -right-20 -bottom-20 w-96 h-96 rounded-full bg-blue-500/10 blur-3xl pointer-events-none"></div>
+          </div>
+
+          {/* DYNAMIC REAL-TIME KPI STATS CARDS */}
+          <div>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-base font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                <span>📊</span> Live Municipal Performance Metrics
+              </h3>
+              <span className="text-xs text-slate-400 font-mono">Connected to Flask API</span>
+            </div>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Total Logged Complaints</span>
+                <span className="text-3xl font-black text-slate-900 mt-2 block">
+                  {loading ? '...' : stats?.total ?? 0}
+                </span>
+                <span className="text-[11px] text-slate-500 mt-1 block">City-wide registered grievances</span>
+              </div>
+
+              <div className="bg-white rounded-2xl p-5 border border-amber-200 shadow-xs">
+                <span className="text-xs font-bold text-amber-600 uppercase tracking-wider block">Pending Verification</span>
+                <span className="text-3xl font-black text-amber-600 mt-2 block">
+                  {loading ? '...' : stats?.pending ?? 0}
+                </span>
+                <span className="text-[11px] text-slate-500 mt-1 block">Awaiting field inspector review</span>
+              </div>
+
+              <div className="bg-white rounded-2xl p-5 border border-emerald-200 shadow-xs">
+                <span className="text-xs font-bold text-emerald-600 uppercase tracking-wider block">Resolved Grievances</span>
+                <div className="flex items-baseline gap-2 mt-2">
+                  <span className="text-3xl font-black text-emerald-600">
+                    {loading ? '...' : stats?.resolved ?? 0}
+                  </span>
+                  <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+                    {stats?.resolution_rate}% rate
+                  </span>
+                </div>
+                <span className="text-[11px] text-slate-500 mt-1 block">Completed repairs & verified</span>
+              </div>
+
+              <div className="bg-white rounded-2xl p-5 border border-red-200 shadow-xs bg-red-50/20">
+                <span className="text-xs font-bold text-red-600 uppercase tracking-wider block">Critical & High Priority</span>
+                <span className="text-3xl font-black text-red-600 mt-2 block">
+                  {loading ? '...' : stats?.critical_and_high ?? 0}
+                </span>
+                <span className="text-[11px] text-red-600 mt-1 block font-medium">Urgent life & safety hazards</span>
+              </div>
+            </div>
+          </div>
+
+          {/* AI ARCHITECTURE HIGHLIGHTS */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xl mb-3">
+                🧠
+              </div>
+              <h4 className="font-bold text-base text-slate-900 mb-1">Scikit-Learn NLP Classification</h4>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Trained TF-IDF + Logistic Regression pipeline accurately routes complaints to Road Damage, Garbage, Water Leakage, Drainage, or Streetlights with calibrated confidence scores.
+              </p>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center font-bold text-xl mb-3">
+                ⚡
+              </div>
+              <h4 className="font-bold text-base text-slate-900 mb-1">4-Dimensional Priority Scoring</h4>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Evaluates Safety Risk (35 pts), Complaint Severity (25 pts), Public Impact (25 pts), and Waiting Time (15 pts) to categorize complaints into Critical, High, Medium, or Low.
+              </p>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+              <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center font-bold text-xl mb-3">
+                🔍
+              </div>
+              <h4 className="font-bold text-base text-slate-900 mb-1">Cosine Similarity Duplicate Detection</h4>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Compares text n-grams against active grievances in the same area to pinpoint duplicate reports without deleting data, enabling streamlined staff review.
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ==========================================
+    // 2. CITIZEN COMPLAINT FORM PAGE
+    // ==========================================
+    function ComplaintFormPage({ navigate, currentUser, showToast }) {
+      const [title, setTitle] = useState('');
+      const [description, setDescription] = useState('');
+      const [category, setCategory] = useState('auto');
+      const [location, setLocation] = useState('');
+      const [landmark, setLandmark] = useState('');
+      const [citizenName, setCitizenName] = useState(currentUser?.name || '');
+      const [citizenEmail, setCitizenEmail] = useState(currentUser?.email || '');
+      const [citizenPhone, setCitizenPhone] = useState(currentUser?.phone || '');
+      const [imageFile, setImageFile] = useState(null);
+      const [imagePreview, setImagePreview] = useState(null);
+      const [submitting, setSubmitting] = useState(false);
+
+      // AI Preview
+      const [aiPreview, setAiPreview] = useState(null);
+      const [aiLoading, setAiLoading] = useState(false);
+
+      // Submission Confirmation Modal
+      const [submittedComplaint, setSubmittedComplaint] = useState(null);
+
+      // Live debounced AI evaluation
+      useEffect(() => {
+        if (!title.trim() && !description.trim()) {
+          setAiPreview(null);
+          return;
+        }
+
+        const timer = setTimeout(async () => {
+          setAiLoading(true);
+          try {
+            const res = await fetch(`${API_BASE}/complaints/preview`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                title,
+                description,
+                category: category === 'auto' ? '' : category,
+                location,
+                landmark
+              })
+            });
+            if (res.ok) {
+              const data = await safeJson(res);
+              setAiPreview(data);
+            }
+          } catch (e) {
+            console.error(e);
+          } finally {
+            setAiLoading(false);
+          }
+        }, 400);
+
+        return () => clearTimeout(timer);
+      }, [title, description, category, location, landmark]);
+
+      const handleImageChange = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          setImageFile(file);
+          setImagePreview(URL.createObjectURL(file));
+        }
+      };
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!title.trim() || !description.trim() || !location.trim()) {
+          showToast('Please fill in title, description, and location.', 'warning');
+          return;
+        }
+
+        setSubmitting(true);
+        try {
+          const formData = new FormData();
+          formData.append('title', title);
+          formData.append('description', description);
+          if (category !== 'auto') formData.append('category', category);
+          formData.append('location', location);
+          formData.append('landmark', landmark);
+          formData.append('citizen_name', citizenName);
+          formData.append('citizen_email', citizenEmail);
+          formData.append('citizen_phone', citizenPhone);
+          if (imageFile) formData.append('image', imageFile);
+
+          const res = await fetch(`${API_BASE}/complaints`, {
+            method: 'POST',
+            body: formData
+          });
+          const data = await safeJson(res);
+          if (!res.ok) throw new Error(data.error || 'Submission failed');
+
+          setSubmittedComplaint(data);
+          showToast(`Complaint ${data.complaint_id} submitted successfully!`, 'success');
+        } catch (err) {
+          showToast(err.message, 'error');
+        } finally {
+          setSubmitting(false);
+        }
+      };
+
+      return (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start animate-fade-in">
+          {/* LEFT: CITIZEN COMPLAINT FORM */}
+          <div className="lg:col-span-7 bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8">
+            <div className="mb-6">
+              <h2 className="text-xl font-bold text-slate-900 tracking-tight">Citizen Grievance Submission</h2>
+              <p className="text-xs text-slate-500 mt-1">
+                Report a municipal issue. Our NLP model will classify it and calculate its priority index in real time.
+              </p>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Complaint Title *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Broken streetlight with exposed live sparking wire"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Detailed Description *
+                  </label>
+                  <span className="text-[11px] text-slate-400">Describe risk, duration, or impact</span>
+                </div>
+                <textarea
+                  rows="4"
+                  required
+                  placeholder="Provide complete details (e.g. High voltage wire dangling outside elementary school gate after storm, risk of electric shock)..."
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                ></textarea>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Category Selection
+                  </label>
+                  <select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none font-medium"
+                  >
+                    <option value="auto">✨ AI Auto-Classification (NLP)</option>
+                    {CATEGORIES.map(c => (
+                      <option key={c} value={c}>{getCategoryIcon(c)} {c}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Location / Address *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. 4th Cross, Gandhi Road"
+                    value={location}
+                    onChange={(e) => setLocation(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Nearby Landmark (Helps Priority & Impact Scoring)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Near St. Mary School, Opposite Metro Station, Beside Apex Hospital"
+                  value={landmark}
+                  onChange={(e) => setLandmark(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
+
+              {/* IMAGE EVIDENCE DROPZONE */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Upload Image Evidence (Optional)
+                </label>
+                <div className="flex items-center gap-4">
+                  <label className="flex-1 border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-xl p-4 text-center cursor-pointer transition-colors bg-slate-50 hover:bg-blue-50/40">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageChange}
+                      className="hidden"
+                    />
+                    <div className="flex flex-col items-center gap-1">
+                      <LucideIcon name="camera" className="w-6 h-6 text-slate-500" />
+                      <span className="text-xs font-semibold text-slate-700">Click to upload photo evidence</span>
+                      <span className="text-[10px] text-slate-400">PNG, JPG, WEBP up to 16MB</span>
+                    </div>
+                  </label>
+
+                  {imagePreview && (
+                    <div className="relative w-24 h-24 rounded-xl overflow-hidden border border-slate-300 shadow-xs flex-shrink-0">
+                      <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => { setImageFile(null); setImagePreview(null); }}
+                        className="absolute top-1 right-1 bg-black/70 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-black"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Citizen Contact Fields */}
+              <div className="pt-2 border-t border-slate-100">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-2">
+                  Citizen Contact (For Verification & SMS Updates)
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <input
+                    type="text"
+                    placeholder="Citizen Name"
+                    value={citizenName}
+                    onChange={(e) => setCitizenName(e.target.value)}
+                    className="px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                  />
+                  <input
+                    type="email"
+                    placeholder="Citizen Email"
+                    value={citizenEmail}
+                    onChange={(e) => setCitizenEmail(e.target.value)}
+                    className="px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                  />
+                  <input
+                    type="tel"
+                    placeholder="Phone (Optional)"
+                    value={citizenPhone}
+                    onChange={(e) => setCitizenPhone(e.target.value)}
+                    className="px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl shadow-md hover:shadow-blue-600/30 transition-all text-sm flex items-center justify-center gap-2"
+              >
+                {submitting ? (
+                  <span>Submitting & Analyzing with AI...</span>
+                ) : (
+                  <>
+                    <LucideIcon name="filePlus" className="w-4 h-4" />
+                    <span>Submit Complaint</span>
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+
+          {/* RIGHT: LIVE AI DIAGNOSTIC PREVIEW */}
+          <div className="lg:col-span-5 space-y-5">
+            <div className="bg-gradient-to-br from-slate-900 to-civic-950 text-white rounded-2xl shadow-xl p-6 border border-slate-800">
+              <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🤖</span>
+                  <h3 className="font-bold text-sm tracking-wide text-white uppercase">Live AI Assessment</h3>
+                </div>
+                {aiLoading ? (
+                  <span className="text-[11px] text-blue-400 animate-pulse font-medium">Analyzing NLP...</span>
+                ) : (
+                  <span className="text-[10px] bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full border border-blue-400/30 font-mono">
+                    Scikit-Learn Ready
+                  </span>
+                )}
+              </div>
+
+              {aiPreview ? (
+                <div className="space-y-4">
+                  {/* Category Prediction */}
+                  <div className="bg-slate-800/80 rounded-xl p-4 border border-slate-700/80">
+                    <div className="text-[11px] text-slate-400 font-medium mb-1">Predicted Category:</div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">{getCategoryIcon(aiPreview.ai_classification.predicted_category)}</span>
+                        <span className="font-bold text-sm text-white">
+                          {aiPreview.ai_classification.predicted_category}
+                        </span>
+                      </div>
+                      <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
+                        {aiPreview.ai_classification.confidence}% Confident
+                      </span>
+                    </div>
+
+                    <div className="w-full bg-slate-700 h-1.5 rounded-full mt-2.5 overflow-hidden">
+                      <div
+                        className="bg-emerald-400 h-full rounded-full transition-all duration-500"
+                        style={{ width: `${Math.min(100, Math.max(15, aiPreview.ai_classification.confidence))}%` }}
+                      ></div>
+                    </div>
+                  </div>
+
+                  {/* Priority Breakdown */}
+                  <div className="bg-slate-800/80 rounded-xl p-4 border border-slate-700/80">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] text-slate-400 font-medium">Priority Prediction:</span>
+                      <span className={`text-xs font-extrabold px-2.5 py-0.5 rounded-full ${
+                        aiPreview.priority_assessment.priority === 'Critical' ? 'bg-red-500 text-white' :
+                        aiPreview.priority_assessment.priority === 'High' ? 'bg-orange-500 text-white' :
+                        aiPreview.priority_assessment.priority === 'Medium' ? 'bg-amber-500 text-white' :
+                        'bg-blue-600 text-white'
+                      }`}>
+                        {aiPreview.priority_assessment.priority} ({aiPreview.priority_assessment.priority_score}/100)
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-300 font-mono mt-3">
+                      <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-700">
+                        <div className="text-slate-400 text-[10px]">Safety Risk</div>
+                        <div className="font-bold text-red-400">{aiPreview.priority_assessment.safety_score} / 35</div>
+                      </div>
+                      <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-700">
+                        <div className="text-slate-400 text-[10px]">Severity</div>
+                        <div className="font-bold text-amber-400">{aiPreview.priority_assessment.severity_score} / 25</div>
+                      </div>
+                      <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-700">
+                        <div className="text-slate-400 text-[10px]">Public Impact</div>
+                        <div className="font-bold text-blue-400">{aiPreview.priority_assessment.impact_score} / 25</div>
+                      </div>
+                      <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-700">
+                        <div className="text-slate-400 text-[10px]">Waiting Time</div>
+                        <div className="font-bold text-purple-400">{aiPreview.priority_assessment.waiting_score} / 15</div>
+                      </div>
+                    </div>
+
+                    <p className="text-[11px] text-slate-300 mt-3 italic border-t border-slate-700/60 pt-2 leading-relaxed">
+                      "{aiPreview.priority_assessment.priority_reason}"
+                    </p>
+                  </div>
+
+                  {/* Duplicate Detection Alert */}
+                  {aiPreview.duplicate_detection.is_duplicate_likely && (
+                    <div className="bg-amber-950/70 border border-amber-500/50 rounded-xl p-3.5 text-xs text-amber-200">
+                      <div className="font-bold flex items-center gap-1.5 text-amber-400 mb-1">
+                        <LucideIcon name="alertTriangle" className="w-4 h-4" />
+                        <span>Potential Duplicate Complaint Detected</span>
+                      </div>
+                      <p className="text-[11px] leading-relaxed">
+                        A matching complaint exists: <strong>{aiPreview.duplicate_detection.top_match?.complaint_id}</strong> ({aiPreview.duplicate_detection.top_similarity}% match).
+                        Staff will review this report alongside existing tickets.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-slate-400 text-xs">
+                  <div className="text-3xl mb-2 opacity-60">🧠</div>
+                  <p>Type in your complaint title and description to preview instant NLP category prediction and priority scoring.</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* SUBMISSION CONFIRMATION MODAL */}
+          {submittedComplaint && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 sm:p-8 border border-slate-100 text-center animate-scale-in">
+                <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">
+                  ✓
+                </div>
+                <h3 className="text-2xl font-bold text-slate-900">Complaint Registered!</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Your grievance has been indexed into the municipal triage database.
+                </p>
+
+                <div className="my-6 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl p-4 flex items-center justify-between">
+                  <div className="text-left">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Complaint ID</span>
+                    <span className="text-lg font-mono font-extrabold text-blue-700">
+                      {submittedComplaint.complaint_id}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(submittedComplaint.complaint_id);
+                      showToast('Complaint ID copied to clipboard!', 'info');
+                    }}
+                    className="bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg shadow-xs"
+                  >
+                    Copy ID
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 text-left mb-6 text-xs bg-slate-50 p-3 rounded-xl border border-slate-200">
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">Category</span>
+                    <span className="font-bold text-slate-800">{submittedComplaint.category}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">Priority</span>
+                    <span className={`inline-block font-extrabold px-2 py-0.5 rounded text-[11px] ${getPriorityBadge(submittedComplaint.priority)}`}>
+                      {submittedComplaint.priority} ({submittedComplaint.priority_score} pts)
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      const id = submittedComplaint.complaint_id;
+                      setSubmittedComplaint(null);
+                      navigate('track', id);
+                    }}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-xl text-xs sm:text-sm shadow-md"
+                  >
+                    Track Progress
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSubmittedComplaint(null);
+                      setTitle('');
+                      setDescription('');
+                      setLocation('');
+                      setLandmark('');
+                      setImageFile(null);
+                      setImagePreview(null);
+                    }}
+                    className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2.5 rounded-xl text-xs sm:text-sm"
+                  >
+                    Submit Another
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ==========================================
+    // 3. COMPLAINT TRACKING PAGE
+    // ==========================================
+    function ComplaintTrackingPage({ initialId, navigate, showToast }) {
+      const [searchId, setSearchId] = useState(initialId || '');
+      const [complaint, setComplaint] = useState(null);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState('');
+
+      const fetchTracking = async (idToSearch) => {
+        const id = (idToSearch || searchId).trim();
+        if (!id) return;
+        setLoading(true);
+        setError('');
+
+        try {
+          const res = await fetch(`${API_BASE}/complaints/track/${id}`);
+          const data = await safeJson(res);
+          if (!res.ok) throw new Error(data.error || 'Complaint not found');
+          setComplaint(data.complaint);
+        } catch (err) {
+          setError(err.message);
+          setComplaint(null);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => {
+        if (initialId) {
+          fetchTracking(initialId);
+        }
+      }, [initialId]);
+
+      const steps = ['Pending', 'Verified', 'In Progress', 'Resolved'];
+      const currentStepIdx = complaint ? steps.indexOf(complaint.status) : -1;
+      const isRejected = complaint?.status === 'Rejected';
+
+      return (
+        <div className="max-w-4xl mx-auto space-y-8 animate-fade-in">
+          {/* SEARCH BOX */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8">
+            <h2 className="text-xl font-bold text-slate-900 tracking-tight mb-2">Track Grievance Status</h2>
+            <p className="text-xs text-slate-500 mb-6">
+              Enter your unique Complaint ID (e.g. CIVIC-2026-1001) to view real-time field status and history.
+            </p>
+
+            <form onSubmit={(e) => { e.preventDefault(); fetchTracking(); }} className="flex gap-3">
+              <input
+                type="text"
+                placeholder="Enter Complaint ID (e.g. CIVIC-2026-1001)"
+                value={searchId}
+                onChange={(e) => setSearchId(e.target.value)}
+                className="flex-1 px-4 py-3 border border-slate-300 rounded-xl text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none uppercase"
+              />
+              <button
+                type="submit"
+                disabled={loading}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-3 rounded-xl transition-all shadow-md text-sm flex items-center gap-1.5"
+              >
+                <LucideIcon name="search" className="w-4 h-4" />
+                <span>{loading ? 'Searching...' : 'Track'}</span>
+              </button>
+            </form>
+
+            {/* Quick Sample IDs */}
+            <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+              <span>Try sample complaints:</span>
+              {['CIVIC-2026-1001', 'CIVIC-2026-1002', 'CIVIC-2026-1003', 'CIVIC-2026-1008'].map(sid => (
+                <button
+                  key={sid}
+                  type="button"
+                  onClick={() => { setSearchId(sid); fetchTracking(sid); }}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono text-[11px] px-2.5 py-1 rounded-md"
+                >
+                  {sid}
+                </button>
+              ))}
+            </div>
+
+            {error && (
+              <div className="mt-4 p-4 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium">
+                {error}
+              </div>
+            )}
+          </div>
+
+          {/* COMPLAINT DETAILS & STEPPER TIMELINE */}
+          {complaint && (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8 space-y-8 animate-fade-in">
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 pb-6 border-b border-slate-200">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-mono font-bold text-sm text-blue-700">{complaint.complaint_id}</span>
+                    <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full border ${getStatusBadge(complaint.status)}`}>
+                      {complaint.status}
+                    </span>
+                    <span className={`text-xs font-extrabold px-2.5 py-0.5 rounded-full ${getPriorityBadge(complaint.priority)}`}>
+                      {complaint.priority} ({complaint.priority_score} pts)
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900">{complaint.title}</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    📍 {complaint.location} {complaint.landmark && `(Near ${complaint.landmark})`}
+                  </p>
+                </div>
+
+                <div className="text-right text-xs text-slate-400">
+                  <div>Submitted on</div>
+                  <div className="font-medium text-slate-700">{complaint.created_at}</div>
+                </div>
+              </div>
+
+              {/* TIMELINE PROGRESS STEPPER */}
+              <div>
+                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-6">Resolution Progress</h4>
+                {isRejected ? (
+                  <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 text-xs text-rose-700">
+                    <strong>Complaint Rejected:</strong> This issue was marked outside municipal jurisdiction or invalid.
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <div className="absolute top-4 left-6 right-6 h-1 bg-slate-200 -z-0 hidden sm:block">
+                      <div
+                        className="bg-blue-600 h-1 transition-all duration-500"
+                        style={{ width: `${Math.max(0, currentStepIdx / (steps.length - 1)) * 100}%` }}
+                      ></div>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 relative z-10">
+                      {steps.map((st, idx) => {
+                        const isDone = idx <= currentStepIdx;
+                        const isCurrent = idx === currentStepIdx;
+                        return (
+                          <div key={st} className="flex flex-col items-center text-center">
+                            <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs mb-2 transition-all ${
+                              isDone ? 'bg-blue-600 text-white ring-4 ring-blue-100 shadow-md' : 'bg-slate-200 text-slate-500'
+                            }`}>
+                              {isDone ? '✓' : idx + 1}
+                            </div>
+                            <span className={`text-xs font-bold ${isCurrent ? 'text-blue-700 font-extrabold' : isDone ? 'text-slate-800' : 'text-slate-400'}`}>
+                              {st}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Description & Photo */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6 border-t border-slate-100">
+                <div className="md:col-span-2 space-y-4">
+                  <div>
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Description</span>
+                    <p className="text-sm text-slate-700 leading-relaxed bg-slate-50 p-4 rounded-xl border border-slate-200">
+                      {complaint.description}
+                    </p>
+                  </div>
+
+                  <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-4 text-xs">
+                    <span className="font-bold text-blue-900 block mb-1">🤖 AI Priority Rationale:</span>
+                    <p className="text-blue-800 leading-relaxed">{complaint.priority_reason}</p>
+                  </div>
+                </div>
+
+                {complaint.image_url ? (
+                  <div>
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Attached Photo</span>
+                    <div className="rounded-xl overflow-hidden border border-slate-200 shadow-sm">
+                      <img src={complaint.image_url} alt="Evidence" className="w-full h-44 object-cover" />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-slate-50 rounded-xl border border-dashed border-slate-200 p-4 flex flex-col items-center justify-center text-slate-400 text-xs text-center">
+                    <LucideIcon name="camera" className="w-6 h-6 mb-1" />
+                    <span>No image attached</span>
+                  </div>
+                )}
+              </div>
+
+              {/* AUDIT LOG TIMELINE */}
+              <div className="pt-6 border-t border-slate-100">
+                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-4">Official Action & Audit Trail</h4>
+                <div className="space-y-3">
+                  {complaint.history && complaint.history.map((h, i) => (
+                    <div key={i} className="flex items-start gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+                      <div className="w-2 h-2 rounded-full bg-blue-500 mt-1.5 flex-shrink-0"></div>
+                      <div className="flex-1">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="font-bold text-slate-800">
+                            Status changed to <span className="text-blue-700">{h.new_status}</span> by {h.changed_by}
+                          </span>
+                          <span className="text-slate-400 text-[11px] font-mono">{h.created_at}</span>
+                        </div>
+                        {h.notes && <p className="text-slate-600 italic">"{h.notes}"</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ==========================================
+    // 4. STAFF LOGIN PAGE
+    // ==========================================
+    function StaffLoginPage({ onLoginSuccess, navigate, showToast }) {
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+      const [mode, setMode] = useState('staff'); // 'staff' or 'citizen' or 'register'
+      const [name, setName] = useState('');
+      const [phone, setPhone] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState('');
+
+      const fillDemo = (role) => {
+        if (role === 'staff') {
+          setEmail('staff@civic.gov');
+          setPassword('staff123');
+          setMode('staff');
+        } else {
+          setEmail('citizen@example.com');
+          setPassword('citizen123');
+          setMode('citizen');
+        }
+        setError('');
+      };
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        setLoading(true);
+
+        try {
+          if (mode === 'register') {
+            const res = await fetch(`${API_BASE}/auth/register`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name, email, password, phone, role: 'citizen' })
+            });
+            const data = await safeJson(res);
+            if (!res.ok) throw new Error(data.error || 'Registration failed');
+            onLoginSuccess(data.user, data.token);
+          } else {
+            const res = await fetch(`${API_BASE}/auth/login`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email, password })
+            });
+            const data = await safeJson(res);
+            if (!res.ok) throw new Error(data.error || 'Invalid credentials');
+            onLoginSuccess(data.user, data.token);
+          }
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return (
+        <div className="max-w-md mx-auto py-10 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-6 sm:p-8">
+            <div className="text-center mb-6">
+              <div className="w-12 h-12 bg-blue-100 text-blue-700 rounded-xl flex items-center justify-center mx-auto mb-3 shadow-xs">
+                <LucideIcon name="shield" className="w-6 h-6" />
+              </div>
+              <h2 className="text-xl font-bold text-slate-900">
+                {mode === 'staff' ? 'Staff Official Login' : mode === 'register' ? 'Register Citizen Account' : 'Citizen Sign In'}
+              </h2>
+              <p className="text-xs text-slate-500 mt-1">
+                Access municipal prioritization and complaint management tools
+              </p>
+            </div>
+
+            {/* QUICK 1-CLICK DEMO BUTTONS */}
+            <div className="bg-blue-50/80 border border-blue-200 rounded-xl p-3.5 mb-6 text-xs">
+              <span className="font-bold text-blue-900 mb-1.5 block">⚡ 1-Click Demo Fill:</span>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => fillDemo('staff')}
+                  className="bg-white hover:bg-blue-100 border border-blue-300 text-blue-900 font-bold py-1.5 px-2 rounded-lg text-center shadow-xs transition-colors"
+                >
+                  🛡️ Staff Officer
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fillDemo('citizen')}
+                  className="bg-white hover:bg-blue-100 border border-blue-300 text-blue-900 font-bold py-1.5 px-2 rounded-lg text-center shadow-xs transition-colors"
+                >
+                  👤 Citizen Demo
+                </button>
+              </div>
+            </div>
+
+            {error && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl font-medium">
+                {error}
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {mode === 'register' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Full Name</label>
+                    <input
+                      type="text"
+                      required
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="e.g. Elena Rostova"
+                      className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Phone Number</label>
+                    <input
+                      type="text"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="+1 (555) 000-0000"
+                      className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    />
+                  </div>
+                </>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Email Address</label>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@civic.gov"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Password</label>
+                <input
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl shadow-md transition-all text-sm mt-2"
+              >
+                {loading ? 'Authenticating...' : mode === 'register' ? 'Register' : 'Sign In'}
+              </button>
+            </form>
+
+            <div className="mt-5 pt-4 border-t border-slate-100 flex justify-between text-xs text-slate-500">
+              <button
+                onClick={() => setMode(mode === 'staff' ? 'citizen' : 'staff')}
+                className="text-blue-600 hover:underline"
+              >
+                Switch to {mode === 'staff' ? 'Citizen Login' : 'Staff Login'}
+              </button>
+              <button
+                onClick={() => setMode(mode === 'register' ? 'citizen' : 'register')}
+                className="text-slate-600 hover:underline font-medium"
+              >
+                {mode === 'register' ? 'Sign In Instead' : 'Register Citizen'}
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ==========================================
+    // 5. STAFF DASHBOARD PAGE
+    // ==========================================
+    function StaffDashboardPage({ currentUser, token, navigate, showToast }) {
+      const [complaints, setComplaints] = useState([]);
+      const [summary, setSummary] = useState(null);
+      const [loading, setLoading] = useState(true);
+
+      // Filters
+      const [search, setSearch] = useState('');
+      const [categoryFilter, setCategoryFilter] = useState('All');
+      const [priorityFilter, setPriorityFilter] = useState('All');
+      const [statusFilter, setStatusFilter] = useState('All');
+      const [duplicateFilter, setDuplicateFilter] = useState('All');
+      const [sortBy, setSortBy] = useState('priority_score');
+
+      const fetchDashboardData = async () => {
+        setLoading(true);
+        try {
+          const params = new URLSearchParams();
+          if (search) params.append('search', search);
+          if (categoryFilter !== 'All') params.append('category', categoryFilter);
+          if (priorityFilter !== 'All') params.append('priority', priorityFilter);
+          if (statusFilter !== 'All') params.append('status', statusFilter);
+          if (duplicateFilter === 'Duplicates Only') params.append('is_duplicate', '1');
+          if (duplicateFilter === 'Unique Only') params.append('is_duplicate', '0');
+          params.append('sort_by', sortBy);
+
+          const [compRes, sumRes] = await Promise.all([
+            fetch(`${API_BASE}/staff/complaints?${params.toString()}`),
+            fetch(`${API_BASE}/analytics/summary`)
+          ]);
+
+          const compData = await safeJson(compRes);
+          const sumData = await safeJson(sumRes);
+
+          setComplaints(compData.complaints || []);
+          setSummary(sumData);
+        } catch (e) {
+          console.error(e);
+          showToast('Failed to fetch staff complaints', 'error');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => {
+        fetchDashboardData();
+      }, [search, categoryFilter, priorityFilter, statusFilter, duplicateFilter, sortBy]);
+
+      const handleRecalculatePriorities = async () => {
+        try {
+          const authTok = token || localStorage.getItem('token');
+          const res = await fetch(`${API_BASE}/staff/recalculate-priorities`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(authTok ? { 'Authorization': `Bearer ${authTok}` } : {})
+            }
+          });
+          const data = await safeJson(res);
+          if (!res.ok) throw new Error(data.error || 'Failed to recalculate priorities');
+          showToast(data.message, 'success');
+          fetchDashboardData();
+        } catch (e) {
+          showToast(e.message || 'Error recalculating aging priorities', 'error');
+        }
+      };
+
+      return (
+        <div className="space-y-8 animate-fade-in">
+          {/* HEADER & QUICK ACTIONS */}
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <LucideIcon name="dashboard" className="w-5 h-5 text-blue-600" />
+                <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Staff Triage Command Center</h2>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Real-time review, dynamic priority queue, and duplicate ticket linkage
+              </p>
+            </div>
+
+            <button
+              onClick={handleRecalculatePriorities}
+              className="bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold px-4 py-2.5 rounded-xl text-xs shadow-xs transition-all flex items-center gap-2 self-start sm:self-auto"
+            >
+              <LucideIcon name="refresh" className="w-3.5 h-3.5 text-blue-600" />
+              <span>Recalculate Aging Priorities</span>
+            </button>
+          </div>
+
+          {/* DYNAMIC KPI SUMMARY CARDS */}
+          {summary && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+              <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Total Complaints</span>
+                <span className="text-2xl font-black text-slate-900 mt-1 block">{summary.total}</span>
+              </div>
+
+              <div className="bg-white rounded-2xl p-4 border border-amber-200 shadow-xs">
+                <span className="text-[11px] font-bold text-amber-600 uppercase tracking-wider block">Pending</span>
+                <span className="text-2xl font-black text-amber-600 mt-1 block">{summary.pending}</span>
+              </div>
+
+              <div className="bg-white rounded-2xl p-4 border border-blue-200 shadow-xs">
+                <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider block">Verified</span>
+                <span className="text-2xl font-black text-blue-600 mt-1 block">{summary.verified}</span>
+              </div>
+
+              <div className="bg-white rounded-2xl p-4 border border-emerald-200 shadow-xs">
+                <span className="text-[11px] font-bold text-emerald-600 uppercase tracking-wider block">Resolved</span>
+                <span className="text-2xl font-black text-emerald-600 mt-1 block">{summary.resolved}</span>
+              </div>
+
+              <div className="bg-white rounded-2xl p-4 border border-red-200 shadow-xs bg-red-50/20 col-span-2 sm:col-span-1">
+                <span className="text-[11px] font-bold text-red-600 uppercase tracking-wider block">Critical</span>
+                <span className="text-2xl font-black text-red-600 mt-1 block">{summary.critical}</span>
+              </div>
+            </div>
+          )}
+
+          {/* TOOLBAR: SEARCH & MULTI-FILTER */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex-1 relative">
+                <input
+                  type="text"
+                  placeholder="Search by ID, keyword, location, citizen name..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2.5 border border-slate-300 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+                <span className="absolute left-3 top-2.5 text-slate-400">
+                  <LucideIcon name="search" className="w-4 h-4" />
+                </span>
+              </div>
+
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="px-3 py-2 border border-slate-300 rounded-xl text-xs font-semibold bg-white text-slate-700"
+              >
+                <option value="priority_score">Priority Score (Highest first)</option>
+                <option value="created_at">Date Submitted (Newest first)</option>
+                <option value="waiting_score">Waiting Escalation</option>
+              </select>
+            </div>
+
+            {/* Filter Pills */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-100">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Category</label>
+                <select
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 font-medium"
+                >
+                  <option value="All">All Categories</option>
+                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Priority</label>
+                <select
+                  value={priorityFilter}
+                  onChange={(e) => setPriorityFilter(e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 font-medium"
+                >
+                  <option value="All">All Priorities</option>
+                  {['Critical', 'High', 'Medium', 'Low'].map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Status</label>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 font-medium"
+                >
+                  <option value="All">All Statuses</option>
+                  {['Pending', 'Verified', 'In Progress', 'Resolved', 'Rejected'].map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Duplicate</label>
+                <select
+                  value={duplicateFilter}
+                  onChange={(e) => setDuplicateFilter(e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 font-medium"
+                >
+                  <option value="All">All Records</option>
+                  <option value="Duplicates Only">Flagged Duplicates</option>
+                  <option value="Unique Only">Unique Only</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* RECENT COMPLAINTS TABLE */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50/80 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200">
+                  <tr>
+                    <th className="py-3.5 px-4">Complaint ID</th>
+                    <th className="py-3.5 px-4">Issue Title & Location</th>
+                    <th className="py-3.5 px-4">Category (NLP)</th>
+                    <th className="py-3.5 px-4">Priority</th>
+                    <th className="py-3.5 px-4">Status</th>
+                    <th className="py-3.5 px-4">Duplicate</th>
+                    <th className="py-3.5 px-4 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {loading ? (
+                    <tr>
+                      <td colSpan="7" className="text-center py-10 text-slate-400">Loading complaints...</td>
+                    </tr>
+                  ) : complaints.length === 0 ? (
+                    <tr>
+                      <td colSpan="7" className="text-center py-10 text-slate-400">No complaints matching the selected criteria.</td>
+                    </tr>
+                  ) : (
+                    complaints.map(comp => (
+                      <tr key={comp.complaint_id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3.5 px-4 font-mono font-bold text-blue-700 whitespace-nowrap">
+                          {comp.complaint_id}
+                        </td>
+                        <td className="py-3.5 px-4 max-w-xs">
+                          <div className="font-semibold text-slate-900 truncate">{comp.title}</div>
+                          <div className="text-[11px] text-slate-400 truncate">📍 {comp.location}</div>
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <span className="font-medium text-slate-800">
+                            {getCategoryIcon(comp.category)} {comp.category}
+                          </span>
+                          <span className="text-[10px] text-slate-400 block font-mono">
+                            {comp.category_confidence}% conf
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <span className={`inline-flex items-center gap-1 font-extrabold px-2.5 py-1 rounded-full text-[11px] ${getPriorityBadge(comp.priority)}`}>
+                            <span>{comp.priority}</span>
+                            <span className="font-mono">({comp.priority_score})</span>
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full border ${getStatusBadge(comp.status)}`}>
+                            {comp.status}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          {comp.is_duplicate ? (
+                            <span className="inline-flex items-center gap-1 bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded text-[10px] font-semibold">
+                              <span>⚠️ Sim: {comp.duplicate_similarity}%</span>
+                              <span className="font-mono">({comp.duplicate_of_id})</span>
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400">Unique</span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                          <button
+                            onClick={() => navigate('details', comp.complaint_id)}
+                            className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold px-3 py-1.5 rounded-lg transition-colors border border-blue-200 shadow-xs"
+                          >
+                            Review & Act →
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ==========================================
+    // 6. COMPLAINT DETAILS PAGE
+    // ==========================================
+    function ComplaintDetailsPage({ complaintId, currentUser, token, navigate, showToast }) {
+      const [complaint, setComplaint] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [newStatus, setNewStatus] = useState('');
+      const [statusNotes, setStatusNotes] = useState('');
+      const [actionLoading, setActionLoading] = useState(false);
+
+      const fetchDetails = async () => {
+        setLoading(true);
+        try {
+          const res = await fetch(`${API_BASE}/staff/complaints/${complaintId}`);
+          const data = await safeJson(res);
+          if (!res.ok) throw new Error(data.error || 'Failed to load details');
+          setComplaint(data.complaint);
+          setNewStatus(data.complaint.status);
+        } catch (e) {
+          showToast(e.message, 'error');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => {
+        if (complaintId) {
+          fetchDetails();
+        }
+      }, [complaintId]);
+
+      // Quick Action: Verify Complaint
+      const handleVerify = async () => {
+        setActionLoading(true);
+        try {
+          const authTok = token || localStorage.getItem('token');
+          const res = await fetch(`${API_BASE}/complaints/${complaintId}/verify`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(authTok ? { 'Authorization': `Bearer ${authTok}` } : {})
+            },
+            body: JSON.stringify({
+              notes: statusNotes || 'Grievance verified by official municipal review.'
+            })
+          });
+          const data = await safeJson(res);
+          if (!res.ok) throw new Error(data.error || 'Failed to verify complaint');
+          showToast(data.message, 'success');
+          setStatusNotes('');
+          fetchDetails();
+        } catch (err) {
+          showToast(err.message, 'error');
+        } finally {
+          setActionLoading(false);
+        }
+      };
+
+      // Quick Action: Reject Complaint
+      const handleReject = async () => {
+        setActionLoading(true);
+        try {
+          const authTok = token || localStorage.getItem('token');
+          const res = await fetch(`${API_BASE}/complaints/${complaintId}/status`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(authTok ? { 'Authorization': `Bearer ${authTok}` } : {})
+            },
+            body: JSON.stringify({
+              status: 'Rejected',
+              notes: statusNotes || 'Complaint rejected after official staff review.',
+              changed_by: currentUser?.name || 'Municipal Officer'
+            })
+          });
+          const data = await safeJson(res);
+          if (!res.ok) throw new Error(data.error || 'Failed to reject complaint');
+          showToast(data.message, 'success');
+          setStatusNotes('');
+          fetchDetails();
+        } catch (err) {
+          showToast(err.message, 'error');
+        } finally {
+          setActionLoading(false);
+        }
+      };
+
+      // Status Update Action
+      const handleStatusSubmit = async (e) => {
+        e.preventDefault();
+        setActionLoading(true);
+        try {
+          const authTok = token || localStorage.getItem('token');
+          const res = await fetch(`${API_BASE}/staff/complaints/${complaintId}/status`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(authTok ? { 'Authorization': `Bearer ${authTok}` } : {})
+            },
+            body: JSON.stringify({
+              status: newStatus,
+              notes: statusNotes,
+              changed_by: currentUser?.name || 'Municipal Officer'
+            })
+          });
+          const data = await safeJson(res);
+          if (!res.ok) throw new Error(data.error || 'Failed to update status');
+
+          showToast(data.message, 'success');
+          setStatusNotes('');
+          fetchDetails();
+        } catch (err) {
+          showToast(err.message, 'error');
+        } finally {
+          setActionLoading(false);
+        }
+      };
+
+      // Duplicate Link Action
+      const handleDuplicateToggle = async (isDuplicate, dupOfId, sim) => {
+        try {
+          const authTok = token || localStorage.getItem('token');
+          const res = await fetch(`${API_BASE}/staff/complaints/${complaintId}/duplicate`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(authTok ? { 'Authorization': `Bearer ${authTok}` } : {})
+            },
+            body: JSON.stringify({
+              is_duplicate: isDuplicate ? 1 : 0,
+              duplicate_of_id: dupOfId || null,
+              duplicate_similarity: sim || 0.0
+            })
+          });
+          const data = await safeJson(res);
+          showToast(data.message, 'success');
+          fetchDetails();
+        } catch (e) {
+          showToast('Failed to update duplicate flag', 'error');
+        }
+      };
+
+      if (loading) {
+        return (
+          <div className="text-center py-20 text-slate-400">
+            <LucideIcon name="refresh" className="w-8 h-8 animate-spin mx-auto mb-2 text-blue-500" />
+            <p className="text-sm">Loading Complaint Dossier...</p>
+          </div>
+        );
+      }
+
+      if (!complaint) {
+        return (
+          <div className="bg-white rounded-2xl p-10 text-center max-w-md mx-auto border border-slate-200">
+            <h3 className="text-lg font-bold text-slate-800 mb-2">Complaint Not Found</h3>
+            <p className="text-xs text-slate-500 mb-4">No record found with ID {complaintId}.</p>
+            <button
+              onClick={() => navigate('dashboard')}
+              className="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-bold"
+            >
+              Back to Dashboard
+            </button>
+          </div>
+        );
+      }
+
+      return (
+        <div className="space-y-6 animate-fade-in">
+          {/* Top Return Bar */}
+          <div className="flex items-center justify-between pb-4 border-b border-slate-200">
+            <button
+              onClick={() => navigate('dashboard')}
+              className="flex items-center gap-2 text-xs font-bold text-slate-600 hover:text-blue-600 transition-colors"
+            >
+              <LucideIcon name="arrowLeft" className="w-4 h-4" />
+              <span>Back to Staff Dashboard</span>
+            </button>
+
+            <div className="flex items-center gap-2">
+              <span className="font-mono font-bold text-blue-700">{complaint.complaint_id}</span>
+              <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${getStatusBadge(complaint.status)}`}>
+                {complaint.status}
+              </span>
+              <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${getPriorityBadge(complaint.priority)}`}>
+                {complaint.priority} ({complaint.priority_score} pts)
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            {/* LEFT 8 COLS: COMPLAINT INFORMATION & AI DOSSIER */}
+            <div className="lg:col-span-8 space-y-6">
+              {/* Core Information Card */}
+              <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Grievance Subject</span>
+                  <h3 className="text-xl font-bold text-slate-900 mt-1">{complaint.title}</h3>
+                  <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-4">
+                    <span>📍 {complaint.location}</span>
+                    {complaint.landmark && <span>🏛️ Near: {complaint.landmark}</span>}
+                    <span>👤 Reported by: {complaint.citizen_name || 'Citizen'} ({complaint.citizen_email || 'N/A'})</span>
+                  </div>
+                </div>
+
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Citizen Statement</span>
+                  <p className="text-xs sm:text-sm text-slate-800 leading-relaxed bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    {complaint.description}
+                  </p>
+                </div>
+
+                {/* Evidence Image */}
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Evidence Photo</span>
+                  {complaint.image_url ? (
+                    <div className="rounded-xl overflow-hidden border border-slate-200 shadow-xs max-h-72">
+                      <img src={complaint.image_url} alt="Evidence" className="w-full h-full object-cover" />
+                    </div>
+                  ) : (
+                    <div className="bg-slate-50 rounded-xl border border-dashed border-slate-200 p-4 text-center text-slate-400 text-xs">
+                      No photographic proof attached
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* AI Priority Breakdown Card */}
+              <div className="bg-gradient-to-br from-slate-900 to-civic-950 text-white rounded-2xl p-6 border border-slate-800 shadow-md">
+                <div className="flex justify-between items-center mb-3 border-b border-slate-800 pb-2">
+                  <span className="font-bold text-xs uppercase tracking-wider text-blue-300">
+                    🤖 Explainable AI Priority Engine
+                  </span>
+                  <span className="font-mono text-xs font-bold text-emerald-400">
+                    Score: {complaint.priority_score} / 100
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono mb-3">
+                  <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700">
+                    <span className="text-[10px] text-slate-400 block">Safety Risk (35)</span>
+                    <span className="font-bold text-red-400 text-sm">{complaint.safety_score} pts</span>
+                  </div>
+                  <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700">
+                    <span className="text-[10px] text-slate-400 block">Severity (25)</span>
+                    <span className="font-bold text-amber-400 text-sm">{complaint.severity_score} pts</span>
+                  </div>
+                  <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700">
+                    <span className="text-[10px] text-slate-400 block">Public Impact (25)</span>
+                    <span className="font-bold text-blue-400 text-sm">{complaint.impact_score} pts</span>
+                  </div>
+                  <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700">
+                    <span className="text-[10px] text-slate-400 block">Waiting Time (15)</span>
+                    <span className="font-bold text-purple-400 text-sm">{complaint.waiting_score} pts</span>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-slate-300 italic leading-relaxed">
+                  "{complaint.priority_reason}"
+                </p>
+              </div>
+
+              {/* DUPLICATE DETECTION RESULT & REVIEW PANEL */}
+              <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+                <div className="flex justify-between items-center mb-3">
+                  <span className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                    <LucideIcon name="search" className="w-4 h-4 text-purple-600" />
+                    <span>TF-IDF Duplicate Detection Result</span>
+                  </span>
+                  {complaint.is_duplicate ? (
+                    <button
+                      onClick={() => handleDuplicateToggle(false, null, 0)}
+                      className="text-[11px] bg-slate-100 border border-slate-300 text-slate-700 px-2.5 py-1 rounded-md hover:bg-slate-200"
+                    >
+                      Dismiss Duplicate Link
+                    </button>
+                  ) : null}
+                </div>
+
+                {complaint.duplicate_analysis?.matches?.length > 0 ? (
+                  <div className="space-y-3">
+                    <p className="text-xs text-slate-500">
+                      Top matching complaints identified in this sector based on cosine similarity of text and geographic tokens:
+                    </p>
+                    {complaint.duplicate_analysis.matches.map(m => (
+                      <div key={m.complaint_id} className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 flex flex-col sm:flex-row justify-between sm:items-center gap-2 text-xs">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-blue-700">{m.complaint_id}</span>
+                            <span className="font-semibold text-slate-800">{m.title}</span>
+                          </div>
+                          <div className="text-[11px] text-slate-400">📍 {m.location} • Status: {m.status}</div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="font-mono font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                            {m.similarity_percentage}% Match
+                          </span>
+                          <button
+                            onClick={() => handleDuplicateToggle(true, m.complaint_id, m.similarity_percentage)}
+                            className="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-2.5 py-1 rounded text-[11px]"
+                          >
+                            Link as Duplicate
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    <p className="text-[11px] text-slate-400 italic">
+                      Notice: Complaints are not automatically deleted. Municipal staff maintains authority to merge work orders.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 italic">
+                    No high-similarity duplicate complaints detected for this report.
+                  </p>
+                )}
+              </div>
+
+              {/* AUDIT LOG TIMELINE */}
+              <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+                <span className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-4">Complete Audit Log History</span>
+                <div className="space-y-3">
+                  {complaint.history?.map((h, i) => (
+                    <div key={i} className="text-xs p-3.5 bg-slate-50 rounded-xl border border-slate-200 flex justify-between items-start">
+                      <div>
+                        <span className="font-bold text-slate-800">{h.new_status}</span> by {h.changed_by}
+                        {h.notes && <p className="text-slate-500 italic mt-0.5">"{h.notes}"</p>}
+                      </div>
+                      <span className="text-[11px] text-slate-400 font-mono">{h.created_at}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* RIGHT 4 COLS: ACTION PANEL */}
+            <div className="lg:col-span-4 sticky top-24 space-y-5">
+              {/* QUICK ACTION BUTTONS: VERIFY & REJECT */}
+              <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
+                <span className="text-xs font-bold text-slate-900 uppercase tracking-wider block">
+                  Official Verification Actions
+                </span>
+                <p className="text-[11px] text-slate-500">
+                  Quick municipal officer triage actions:
+                </p>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleVerify}
+                    disabled={actionLoading || complaint.status === 'Verified'}
+                    className={`py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm ${
+                      complaint.status === 'Verified'
+                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-300 cursor-not-allowed opacity-80'
+                        : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-200'
+                    }`}
+                  >
+                    <LucideIcon name="checkCircle" className="w-4 h-4" />
+                    {complaint.status === 'Verified' ? 'Already Verified' : 'Verify Complaint'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleReject}
+                    disabled={actionLoading || complaint.status === 'Rejected'}
+                    className={`py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm ${
+                      complaint.status === 'Rejected'
+                        ? 'bg-rose-100 text-rose-800 border border-rose-300 cursor-not-allowed opacity-80'
+                        : 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-200'
+                    }`}
+                  >
+                    <LucideIcon name="alertCircle" className="w-4 h-4" />
+                    {complaint.status === 'Rejected' ? 'Already Rejected' : 'Reject Complaint'}
+                  </button>
+                </div>
+              </div>
+
+              {/* CUSTOM STATUS UPDATE & REMARKS */}
+              <form onSubmit={handleStatusSubmit} className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+                <span className="text-xs font-bold text-slate-900 uppercase tracking-wider block">
+                  Update Resolution Status
+                </span>
+
+                <div className="space-y-2">
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase">Select New Status</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {['Pending', 'Verified', 'In Progress', 'Resolved', 'Rejected'].map(st => (
+                      <button
+                        key={st}
+                        type="button"
+                        onClick={() => setNewStatus(st)}
+                        className={`py-2 px-3 rounded-lg text-xs font-bold transition-all border ${
+                          newStatus === st ? 'bg-blue-600 text-white border-blue-700 shadow-sm' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {st}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
+                    Inspector Remarks / Work Order Notes
+                  </label>
+                  <textarea
+                    rows="3"
+                    placeholder="e.g. Field inspection completed, work order #849 issued..."
+                    value={statusNotes}
+                    onChange={(e) => setStatusNotes(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  ></textarea>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={actionLoading}
+                  className="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-1.5"
+                >
+                  <LucideIcon name="refresh" className="w-3.5 h-3.5" />
+                  {actionLoading ? 'Updating...' : 'Update Status & Remarks'}
+                </button>
+              </form>
+
+              {/* Quick Metadata Box */}
+              <div className="bg-slate-100 rounded-2xl p-4 text-xs text-slate-600 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Predicted Category:</span>
+                  <span className="font-bold text-slate-800">{complaint.predicted_category}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">NLP Confidence:</span>
+                  <span className="font-mono font-bold text-slate-800">{complaint.category_confidence}%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Submission Timestamp:</span>
+                  <span className="font-mono text-slate-700">{complaint.created_at}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ==========================================
+    // 7. ANALYTICS PAGE (CHART.JS)
+    // ==========================================
+    function AnalyticsPage({ showToast }) {
+      const [summary, setSummary] = useState(null);
+      const [chartData, setChartData] = useState(null);
+      const [loading, setLoading] = useState(true);
+
+      const categoryChartRef = useRef(null);
+      const priorityChartRef = useRef(null);
+      const statusChartRef = useRef(null);
+      const monthlyChartRef = useRef(null);
+
+      const categoryInstance = useRef(null);
+      const priorityInstance = useRef(null);
+      const statusInstance = useRef(null);
+      const monthlyInstance = useRef(null);
+
+      const loadAnalytics = async () => {
+        setLoading(true);
+        try {
+          const [sumRes, chartRes] = await Promise.all([
+            fetch(`${API_BASE}/analytics/summary`),
+            fetch(`${API_BASE}/analytics/charts`)
+          ]);
+          const sumData = await safeJson(sumRes);
+          const cData = await safeJson(chartRes);
+          setSummary(sumData);
+          setChartData(cData);
+        } catch (e) {
+          showToast('Failed to load chart analytics', 'error');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => {
+        loadAnalytics();
+      }, []);
+
+      useEffect(() => {
+        if (!chartData) return;
+
+        // 1. Complaints by Category (Doughnut)
+        if (categoryChartRef.current) {
+          if (categoryInstance.current) categoryInstance.current.destroy();
+          const ctx = categoryChartRef.current.getContext('2d');
+          categoryInstance.current = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+              labels: chartData.categories.labels,
+              datasets: [{
+                data: chartData.categories.data,
+                backgroundColor: [
+                  '#2563eb', // Road Damage
+                  '#10b981', // Garbage Accumulation
+                  '#06b6d4', // Water Leakage
+                  '#8b5cf6', // Blocked Drainage
+                  '#f59e0b', // Broken Streetlights
+                ],
+                borderWidth: 2,
+                borderColor: '#ffffff'
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } }
+            }
+          });
+        }
+
+        // 2. Complaints by Priority (Bar)
+        if (priorityChartRef.current) {
+          if (priorityInstance.current) priorityInstance.current.destroy();
+          const ctx = priorityChartRef.current.getContext('2d');
+          priorityInstance.current = new Chart(ctx, {
+            type: 'bar',
+            data: {
+              labels: chartData.priorities.labels,
+              datasets: [{
+                label: 'Complaints',
+                data: chartData.priorities.data,
+                backgroundColor: [
+                  '#ef4444', // Critical
+                  '#f97316', // High
+                  '#f59e0b', // Medium
+                  '#3b82f6', // Low
+                ],
+                borderRadius: 8
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                y: { beginAtZero: true, grid: { color: '#f1f5f9' }, ticks: { stepSize: 1 } },
+                x: { grid: { display: false } }
+              }
+            }
+          });
+        }
+
+        // 3. Pending vs Resolved Pipeline (Polar Area)
+        if (statusChartRef.current) {
+          if (statusInstance.current) statusInstance.current.destroy();
+          const ctx = statusChartRef.current.getContext('2d');
+          statusInstance.current = new Chart(ctx, {
+            type: 'polarArea',
+            data: {
+              labels: chartData.statuses.labels,
+              datasets: [{
+                data: chartData.statuses.data,
+                backgroundColor: [
+                  'rgba(245, 158, 11, 0.7)', // Pending
+                  'rgba(59, 130, 246, 0.7)',  // Verified
+                  'rgba(139, 92, 246, 0.7)',  // In Progress
+                  'rgba(16, 185, 129, 0.7)',  // Resolved
+                  'rgba(244, 63, 94, 0.7)',   // Rejected
+                ]
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } }
+            }
+          });
+        }
+
+        // 4. Monthly Complaints Chart (Line)
+        if (monthlyChartRef.current) {
+          if (monthlyInstance.current) monthlyInstance.current.destroy();
+          const ctx = monthlyChartRef.current.getContext('2d');
+          monthlyInstance.current = new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels: chartData.monthly.labels,
+              datasets: [
+                {
+                  label: 'Registered Complaints',
+                  data: chartData.monthly.submitted,
+                  borderColor: '#2563eb',
+                  backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                  fill: true,
+                  tension: 0.35,
+                  pointRadius: 4
+                },
+                {
+                  label: 'Resolved Issues',
+                  data: chartData.monthly.resolved,
+                  borderColor: '#10b981',
+                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                  fill: true,
+                  tension: 0.35,
+                  pointRadius: 4
+                }
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } } },
+              scales: {
+                y: { beginAtZero: true, grid: { color: '#f1f5f9' }, ticks: { stepSize: 2 } },
+                x: { grid: { display: false } }
+              }
+            }
+          });
+        }
+
+        return () => {
+          if (categoryInstance.current) categoryInstance.current.destroy();
+          if (priorityInstance.current) priorityInstance.current.destroy();
+          if (statusInstance.current) statusInstance.current.destroy();
+          if (monthlyInstance.current) monthlyInstance.current.destroy();
+        };
+      }, [chartData]);
+
+      return (
+        <div className="space-y-8 animate-fade-in">
+          <div className="flex justify-between items-center">
+            <div>
+              <div className="flex items-center gap-2">
+                <LucideIcon name="barChart" className="w-5 h-5 text-blue-600" />
+                <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Municipal Intelligence & Analytics</h2>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Real-time grievance distributions, resolution velocity, and monthly trends
+              </p>
+            </div>
+
+            <button
+              onClick={loadAnalytics}
+              className="bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold px-4 py-2 rounded-xl text-xs shadow-xs flex items-center gap-1.5"
+            >
+              <LucideIcon name="refresh" className="w-3.5 h-3.5" />
+              <span>Refresh Charts</span>
+            </button>
+          </div>
+
+          {/* DYNAMIC KPI SUMMARY CARDS */}
+          {summary && (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Resolution Velocity</span>
+                <div className="flex items-baseline gap-2 mt-2">
+                  <span className="text-3xl font-black text-emerald-600">{summary.resolution_rate}%</span>
+                  <span className="text-xs text-slate-500">({summary.resolved}/{summary.total} resolved)</span>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Average Priority Score</span>
+                <div className="flex items-baseline gap-2 mt-2">
+                  <span className="text-3xl font-black text-blue-600">{summary.avg_priority_score}</span>
+                  <span className="text-xs text-slate-500">/ 100 max index</span>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Critical & High Backlog</span>
+                <div className="flex items-baseline gap-2 mt-2">
+                  <span className="text-3xl font-black text-red-600">{summary.critical_and_high}</span>
+                  <span className="text-xs text-slate-500">Urgent field tickets</span>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Duplicates Merged</span>
+                <div className="flex items-baseline gap-2 mt-2">
+                  <span className="text-3xl font-black text-purple-600">{summary.duplicates_flagged}</span>
+                  <span className="text-xs text-slate-500">Linked tickets</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 4 CHART.JS VISUALIZATIONS */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+              <h4 className="font-bold text-sm text-slate-900 mb-4 flex items-center gap-2">
+                <span>🍩</span> Category Distribution (NLP Classification)
+              </h4>
+              <div className="h-64 relative">
+                <canvas ref={categoryChartRef}></canvas>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+              <h4 className="font-bold text-sm text-slate-900 mb-4 flex items-center gap-2">
+                <span>📊</span> Priority Distribution
+              </h4>
+              <div className="h-64 relative">
+                <canvas ref={priorityChartRef}></canvas>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+              <h4 className="font-bold text-sm text-slate-900 mb-4 flex items-center gap-2">
+                <span>🔄</span> Pending versus Resolved Resolution Pipeline
+              </h4>
+              <div className="h-64 relative">
+                <canvas ref={statusChartRef}></canvas>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+              <h4 className="font-bold text-sm text-slate-900 mb-4 flex items-center gap-2">
+                <span>📈</span> Monthly Complaints Statistics
+              </h4>
+              <div className="h-64 relative">
+                <canvas ref={monthlyChartRef}></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Mount Root
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
