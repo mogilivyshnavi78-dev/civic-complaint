@@ -105,19 +105,18 @@
     // Safe JSON parser: Never crashes with 'Unexpected token <'
     async function safeJson(res) {
       if (!res) return null;
+      const ct = res.headers && res.headers.get ? (res.headers.get('content-type') || '') : '';
+      if (ct.includes('application/json')) {
+        return await safeJson(res);
+      }
+      const rawText = await res.text();
       try {
-        const text = await res.text();
-        if (!text || !text.trim()) return {};
-        try {
-          return JSON.parse(text);
-        } catch (e) {
-          if (text.trim().startsWith('<') || text.includes('<!DOCTYPE') || text.includes('<html')) {
-            throw new Error(`The backend returned an HTML page (HTTP ${res.status || 'unknown'}). Verify your Flask backend deployment URL.`);
-          }
-          throw new Error(text || `Request failed with status ${res.status}`);
+        return JSON.parse(rawText);
+      } catch (e) {
+        if (rawText.trim().startsWith('<') || rawText.includes('<!DOCTYPE') || rawText.includes('<html')) {
+          throw new Error(`The backend returned an HTML page (HTTP ${res.status}). Verify your Flask backend deployment URL.`);
         }
-      } catch (err) {
-        throw err;
+        throw new Error(rawText || `Request failed with status ${res.status}`);
       }
     }
 
@@ -692,42 +691,20 @@
 
       // 7. /api/complaints/preview
       if (path === '/api/complaints/preview') {
-        const body = options.body ? (typeof options.body === 'string' ? JSON.parse(options.body) : options.body) : {};
+        const body = options.body ? JSON.parse(options.body) : {};
         const catRes = clientPredictCategory(body.description || body.title || '');
         const prioRes = clientCalculatePriority(body.title, body.description, body.location);
         const dupRes = clientFindDuplicates(body.title || '', body.description || '', complaints);
         return jsonResponse({
           predicted_category: catRes.predicted_category,
           category_confidence: catRes.confidence,
-          ai_classification: {
-            predicted_category: catRes.predicted_category,
-            confidence: catRes.confidence,
-            probabilities: { [catRes.predicted_category]: catRes.confidence }
-          },
           priority_assessment: {
             priority: prioRes.priority,
             score: prioRes.score,
-            priority_score: prioRes.score,
             explanation: prioRes.explanation,
-            priority_reason: prioRes.explanation,
-            sub_scores: prioRes.sub_scores,
-            safety_score: prioRes.sub_scores ? prioRes.sub_scores.safety_risk : 8.0,
-            severity_score: prioRes.sub_scores ? prioRes.sub_scores.severity : 7.0,
-            impact_score: prioRes.sub_scores ? prioRes.sub_scores.public_impact : 7.5,
-            waiting_score: prioRes.sub_scores ? prioRes.sub_scores.waiting_time : 2.0,
-            factors: []
+            sub_scores: prioRes.sub_scores
           },
-          duplicate_analysis: dupRes,
-          duplicate_detection: {
-            is_duplicate: dupRes.is_duplicate,
-            is_duplicate_likely: dupRes.is_duplicate === 1 || dupRes.is_duplicate === true,
-            similarity_percentage: dupRes.similarity_percentage,
-            top_similarity: dupRes.similarity_percentage,
-            similar_complaint_id: dupRes.similar_complaint_id,
-            existing_complaint_description: dupRes.existing_complaint_description,
-            top_match: dupRes.similar_complaint_id ? { complaint_id: dupRes.similar_complaint_id } : null,
-            matches: dupRes.matches || []
-          }
+          duplicate_analysis: dupRes
         });
       }
 
@@ -740,7 +717,7 @@
       }
 
       // 9. /api/complaints or /api/staff/complaints (GET)
-      if ((path === '/api/complaints' || path === '/api/staff/complaints') && method === 'GET') {
+      if (path === '/api/complaints' || path === '/api/staff/complaints') {
         let filtered = [...complaints];
         const search = (params.get('search') || '').toLowerCase();
         const category = params.get('category');
@@ -851,7 +828,7 @@
       }
 
       // 15. Submit Complaint: /api/complaints (POST)
-      if ((path === '/api/complaints' || path === '/api/staff/complaints') && method === 'POST') {
+      if (path === '/api/complaints' && method === 'POST') {
         let body = {};
         if (options.body instanceof FormData) {
           for (const [k, v] of options.body.entries()) {
@@ -919,18 +896,19 @@
       const hasRemoteBackend = !!configuredBackend;
 
       // On localhost:5000 or when user specified an external backend URL, attempt real fetch
-      if (isLocalFlask || hasRemoteBackend) {
+      if (!isGitHubPages || isLocalFlask || hasRemoteBackend) {
         try {
           let reqUrl = urlStr;
           if (configuredBackend && urlStr.startsWith('/api')) {
             reqUrl = configuredBackend.replace(/\/$/, '') + urlStr;
           }
           const resp = await originalFetch(reqUrl, options);
-          const ct = (resp && resp.headers && resp.headers.get) ? (resp.headers.get('content-type') || '') : '';
-          if (resp && (resp.ok || ct.includes('application/json'))) {
+          const ct = resp.headers.get('content-type') || '';
+          if (resp.ok || ct.includes('application/json')) {
             return resp;
           }
         } catch (netErr) {
+          if (!isGitHubPages && !hasRemoteBackend) throw netErr;
           console.warn('[CivicEngine] Backend fetch error, switching to in-browser engine:', netErr);
         }
       }
@@ -2021,20 +1999,20 @@
                     <div className="text-[11px] text-slate-400 font-medium mb-1">Predicted Category:</div>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="text-xl">{getCategoryIcon(aiPreview?.ai_classification?.predicted_category || aiPreview?.predicted_category || 'Road Damage')}</span>
+                        <span className="text-xl">{getCategoryIcon(aiPreview.ai_classification.predicted_category)}</span>
                         <span className="font-bold text-sm text-white">
-                          {aiPreview?.ai_classification?.predicted_category || aiPreview?.predicted_category || 'Assessing...'}
+                          {aiPreview.ai_classification.predicted_category}
                         </span>
                       </div>
                       <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
-                        {aiPreview?.ai_classification?.confidence || aiPreview?.category_confidence || 85}% Confident
+                        {aiPreview.ai_classification.confidence}% Confident
                       </span>
                     </div>
 
                     <div className="w-full bg-slate-700 h-1.5 rounded-full mt-2.5 overflow-hidden">
                       <div
                         className="bg-emerald-400 h-full rounded-full transition-all duration-500"
-                        style={{ width: `${Math.min(100, Math.max(15, aiPreview?.ai_classification?.confidence || aiPreview?.category_confidence || 85))}%` }}
+                        style={{ width: `${Math.min(100, Math.max(15, aiPreview.ai_classification.confidence))}%` }}
                       ></div>
                     </div>
                   </div>
@@ -2044,48 +2022,48 @@
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-[11px] text-slate-400 font-medium">Priority Prediction:</span>
                       <span className={`text-xs font-extrabold px-2.5 py-0.5 rounded-full ${
-                        (aiPreview?.priority_assessment?.priority || aiPreview?.priority) === 'Critical' ? 'bg-red-500 text-white' :
-                        (aiPreview?.priority_assessment?.priority || aiPreview?.priority) === 'High' ? 'bg-orange-500 text-white' :
-                        (aiPreview?.priority_assessment?.priority || aiPreview?.priority) === 'Medium' ? 'bg-amber-500 text-white' :
+                        aiPreview.priority_assessment.priority === 'Critical' ? 'bg-red-500 text-white' :
+                        aiPreview.priority_assessment.priority === 'High' ? 'bg-orange-500 text-white' :
+                        aiPreview.priority_assessment.priority === 'Medium' ? 'bg-amber-500 text-white' :
                         'bg-blue-600 text-white'
                       }`}>
-                        {aiPreview?.priority_assessment?.priority || aiPreview?.priority || 'Medium'} ({aiPreview?.priority_assessment?.priority_score || aiPreview?.priority_score || 50}/100)
+                        {aiPreview.priority_assessment.priority} ({aiPreview.priority_assessment.priority_score}/100)
                       </span>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-300 font-mono mt-3">
                       <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-700">
                         <div className="text-slate-400 text-[10px]">Safety Risk</div>
-                        <div className="font-bold text-red-400">{aiPreview?.priority_assessment?.safety_score ?? (aiPreview?.sub_scores?.safety_risk ?? 8.0)} / 35</div>
+                        <div className="font-bold text-red-400">{aiPreview.priority_assessment.safety_score} / 35</div>
                       </div>
                       <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-700">
                         <div className="text-slate-400 text-[10px]">Severity</div>
-                        <div className="font-bold text-amber-400">{aiPreview?.priority_assessment?.severity_score ?? (aiPreview?.sub_scores?.severity ?? 7.0)} / 25</div>
+                        <div className="font-bold text-amber-400">{aiPreview.priority_assessment.severity_score} / 25</div>
                       </div>
                       <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-700">
                         <div className="text-slate-400 text-[10px]">Public Impact</div>
-                        <div className="font-bold text-blue-400">{aiPreview?.priority_assessment?.impact_score ?? (aiPreview?.sub_scores?.public_impact ?? 7.5)} / 25</div>
+                        <div className="font-bold text-blue-400">{aiPreview.priority_assessment.impact_score} / 25</div>
                       </div>
                       <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-700">
                         <div className="text-slate-400 text-[10px]">Waiting Time</div>
-                        <div className="font-bold text-purple-400">{aiPreview?.priority_assessment?.waiting_score ?? (aiPreview?.sub_scores?.waiting_time ?? 2.0)} / 15</div>
+                        <div className="font-bold text-purple-400">{aiPreview.priority_assessment.waiting_score} / 15</div>
                       </div>
                     </div>
 
                     <p className="text-[11px] text-slate-300 mt-3 italic border-t border-slate-700/60 pt-2 leading-relaxed">
-                      "{aiPreview?.priority_assessment?.priority_reason || aiPreview?.priority_reason || 'Multi-factor priority score calculated.'}"
+                      "{aiPreview.priority_assessment.priority_reason}"
                     </p>
                   </div>
 
                   {/* Duplicate Detection Alert */}
-                  {Boolean(aiPreview?.duplicate_detection?.is_duplicate_likely || aiPreview?.duplicate_detection?.is_duplicate || aiPreview?.is_duplicate) && (
+                  {aiPreview.duplicate_detection.is_duplicate_likely && (
                     <div className="bg-amber-950/70 border border-amber-500/50 rounded-xl p-3.5 text-xs text-amber-200">
                       <div className="font-bold flex items-center gap-1.5 text-amber-400 mb-1">
                         <LucideIcon name="alertTriangle" className="w-4 h-4" />
                         <span>Potential Duplicate Complaint Detected</span>
                       </div>
                       <p className="text-[11px] leading-relaxed">
-                        A matching complaint exists: <strong>{aiPreview?.duplicate_detection?.top_match?.complaint_id || aiPreview?.duplicate_detection?.similar_complaint_id || 'Existing Ticket'}</strong> ({aiPreview?.duplicate_detection?.top_similarity || aiPreview?.duplicate_detection?.similarity_percentage || 80}% match).
+                        A matching complaint exists: <strong>{aiPreview.duplicate_detection.top_match?.complaint_id}</strong> ({aiPreview.duplicate_detection.top_similarity}% match).
                         Staff will review this report alongside existing tickets.
                       </p>
                     </div>
